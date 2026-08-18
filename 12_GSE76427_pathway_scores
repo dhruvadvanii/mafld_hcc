@@ -1,0 +1,2025 @@
+# ============================================================
+# STEP 12 — GSE76427 EXTERNAL VALIDATION OF STEP 10
+# CORRECTED VERSION
+#
+# IMPORTANT CORRECTION:
+# gse76427_gene_expression is a LIST in the current session.
+# This code therefore identifies the actual numeric expression
+# matrix among the existing GSE76427 expression objects.
+#
+# No [[ syntax is used anywhere in this code.
+# ============================================================
+
+
+cat("\n============================================================\n")
+cat("STEP 12 — GSE76427 EXTERNAL VALIDATION\n")
+cat("CORRECTED EXPRESSION-MATRIX HANDLING\n")
+cat("============================================================\n\n")
+
+
+# ============================================================
+# 12.1 — REQUIRED GENE SET OBJECT
+# ============================================================
+
+if (
+    !exists(
+        "final_gene_sets",
+        envir = .GlobalEnv
+    )
+) {
+
+    stop(
+        "final_gene_sets is missing from the current R session."
+    )
+
+}
+
+
+cat(
+    "Confirmed: final_gene_sets exists.\n"
+)
+
+
+# ============================================================
+# 12.2 — IDENTIFY THE ACTUAL GSE76427 EXPRESSION MATRIX
+# ============================================================
+
+candidate_expression_names <-
+    c(
+        "gse_symbol_expression",
+        "gse_expression",
+        "gse_expr",
+        "gse76427_gene_expression",
+        "gse76427_raw_expression",
+        "tumor_expression"
+    )
+
+
+candidate_expression_names <-
+    candidate_expression_names[
+        candidate_expression_names %in%
+            ls(
+                envir = .GlobalEnv
+            )
+    ]
+
+
+if (
+    length(
+        candidate_expression_names
+    ) == 0
+) {
+
+    stop(
+        "No candidate GSE76427 expression objects were found."
+    )
+
+}
+
+
+cat(
+    "\nCandidate expression objects found:\n\n"
+)
+
+print(
+    candidate_expression_names
+)
+
+
+# ------------------------------------------------------------
+# Function to determine whether an object is matrix-like
+# ------------------------------------------------------------
+
+is_matrix_like <-
+    function(
+        object
+    ) {
+
+        is.matrix(
+            object
+        ) ||
+        is.data.frame(
+            object
+        )
+
+    }
+
+
+# ------------------------------------------------------------
+# First search: directly available matrix/data.frame objects
+# ------------------------------------------------------------
+
+direct_candidates <-
+    character(
+        0
+    )
+
+
+for (
+    object_name in
+    candidate_expression_names
+) {
+
+    current_object <-
+        get(
+            object_name,
+            envir =
+                .GlobalEnv
+        )
+
+
+    if (
+        is_matrix_like(
+            current_object
+        )
+    ) {
+
+        direct_candidates <-
+            c(
+                direct_candidates,
+                object_name
+            )
+
+    }
+
+}
+
+
+cat(
+    "\nDirect matrix/data.frame candidates:\n\n"
+)
+
+if (
+    length(
+        direct_candidates
+    ) > 0
+) {
+
+    print(
+        direct_candidates
+    )
+
+} else {
+
+    cat(
+        "No direct matrix/data.frame candidate found.\n"
+    )
+
+}
+
+
+# ============================================================
+# 12.3 — SEARCH INSIDE LIST OBJECTS IF NECESSARY
+# ============================================================
+
+if (
+    length(
+        direct_candidates
+    ) == 0
+) {
+
+    cat(
+        "\nSearching inside list objects for an expression matrix...\n"
+    )
+
+
+    for (
+        object_name in
+        candidate_expression_names
+    ) {
+
+        current_object <-
+            get(
+                object_name,
+                envir =
+                    .GlobalEnv
+            )
+
+
+        if (
+            is.list(
+                current_object
+            )
+        ) {
+
+            current_names <-
+                names(
+                    current_object
+                )
+
+
+            if (
+                !is.null(
+                    current_names
+                )
+            ) {
+
+                for (
+                    component_name in
+                    current_names
+                ) {
+
+                    component_object <-
+                        getElement(
+                            current_object,
+                            component_name
+                        )
+
+
+                    if (
+                        is_matrix_like(
+                            component_object
+                        )
+                    ) {
+
+                        component_rows <-
+                            nrow(
+                                component_object
+                            )
+
+
+                        component_cols <-
+                            ncol(
+                                component_object
+                            )
+
+
+                        if (
+                            component_cols ==
+                                115 &&
+                            component_rows >
+                                50
+                        ) {
+
+                            direct_candidates <-
+                                c(
+                                    direct_candidates,
+                                    paste0(
+                                        object_name,
+                                        "$",
+                                        component_name
+                                    )
+                                )
+
+                        }
+
+                    }
+
+                }
+
+            }
+
+        }
+
+    }
+
+}
+
+
+cat(
+    "\nExpression matrix candidates compatible with 115 samples:\n\n"
+)
+
+
+if (
+    length(
+        direct_candidates
+    ) > 0
+) {
+
+    print(
+        direct_candidates
+    )
+
+} else {
+
+    stop(
+        paste0(
+            "Could not identify an expression matrix containing ",
+            "exactly 115 samples. The available objects need ",
+            "to be inspected before proceeding."
+        )
+    )
+
+}
+
+
+# ============================================================
+# 12.4 — SELECT THE BEST EXPRESSION MATRIX
+# ============================================================
+#
+# Prefer:
+# 1. gse_symbol_expression
+# 2. another direct matrix with 115 samples
+# 3. matrix stored inside gse76427_gene_expression
+#
+# ============================================================
+
+
+preferred_direct <-
+    c(
+        "gse_symbol_expression",
+        "gse_expression",
+        "gse_expr",
+        "gse76427_raw_expression"
+    )
+
+
+selected_direct <-
+    preferred_direct[
+        preferred_direct %in%
+            direct_candidates
+    ]
+
+
+if (
+    length(
+        selected_direct
+    ) > 0
+) {
+
+    selected_expression_name <-
+        selected_direct[
+            1
+        ]
+
+} else {
+
+    selected_expression_name <-
+        direct_candidates[
+            1
+        ]
+
+}
+
+
+cat(
+    "\nSelected expression object: ",
+    selected_expression_name,
+    "\n",
+    sep = ""
+)
+
+
+# ------------------------------------------------------------
+# Extract selected object
+# ------------------------------------------------------------
+
+if (
+    grepl(
+        "\\$",
+        selected_expression_name
+    )
+) {
+
+    parent_name <-
+        sub(
+            "\\$.*$",
+            "",
+            selected_expression_name
+        )
+
+
+    component_name <-
+        sub(
+            "^.*\\$",
+            "",
+            selected_expression_name
+        )
+
+
+    parent_object <-
+        get(
+            parent_name,
+            envir =
+                .GlobalEnv
+        )
+
+
+    gse12_expression <-
+        getElement(
+            parent_object,
+            component_name
+        )
+
+} else {
+
+    gse12_expression <-
+        get(
+            selected_expression_name,
+            envir =
+                .GlobalEnv
+        )
+
+}
+
+
+# ============================================================
+# 12.5 — CONVERT TO NUMERIC EXPRESSION MATRIX
+# ============================================================
+
+if (
+    !is_matrix_like(
+        gse12_expression
+    )
+) {
+
+    stop(
+        "The selected GSE76427 expression object is still not matrix-like."
+    )
+
+}
+
+
+if (
+    is.data.frame(
+        gse12_expression
+    )
+) {
+
+    gse12_expression <-
+        as.matrix(
+            gse12_expression
+        )
+
+}
+
+
+# ------------------------------------------------------------
+# Ensure numeric values
+# ------------------------------------------------------------
+
+if (
+    !is.numeric(
+        gse12_expression
+    )
+) {
+
+    suppressWarnings(
+        gse12_expression <-
+            apply(
+                gse12_expression,
+                2,
+                as.numeric
+            )
+    )
+
+}
+
+
+gse12_expression <-
+    as.matrix(
+        gse12_expression
+    )
+
+
+storage.mode(
+    gse12_expression
+) <-
+    "numeric"
+
+
+cat(
+    "\nFinal GSE76427 expression dimensions: ",
+    nrow(
+        gse12_expression
+    ),
+    " genes x ",
+    ncol(
+        gse12_expression
+    ),
+    " samples\n",
+    sep = ""
+)
+
+
+# ============================================================
+# 12.6 — VERIFY SAMPLE IDENTIFIERS
+# ============================================================
+
+if (
+    is.null(
+        colnames(
+            gse12_expression
+        )
+    )
+) {
+
+    stop(
+        "GSE76427 expression matrix has no sample identifiers."
+    )
+
+}
+
+
+if (
+    ncol(
+        gse12_expression
+    ) !=
+        115
+) {
+
+    stop(
+        paste0(
+            "The selected expression matrix contains ",
+            ncol(
+                gse12_expression
+            ),
+            " samples instead of the expected 115."
+        )
+    )
+
+}
+
+
+cat(
+    "Confirmed: exactly 115 GSE76427 samples are being validated.\n"
+)
+
+
+# ============================================================
+# 12.7 — STANDARDIZE GENE SYMBOLS
+# ============================================================
+
+rownames(
+    gse12_expression
+) <-
+    toupper(
+        trimws(
+            rownames(
+                gse12_expression
+            )
+        )
+    )
+
+
+valid_gene_rows <-
+    !is.na(
+        rownames(
+            gse12_expression
+        )
+    ) &
+    rownames(
+        gse12_expression
+    ) != ""
+
+
+gse12_expression <-
+    gse12_expression[
+        valid_gene_rows,
+        ,
+        drop = FALSE
+    ]
+
+
+# ============================================================
+# 12.8 — COLLAPSE DUPLICATE GENES
+# ============================================================
+
+if (
+    any(
+        duplicated(
+            rownames(
+                gse12_expression
+            )
+        )
+    )
+) {
+
+    unique_genes <-
+        unique(
+            rownames(
+                gse12_expression
+            )
+        )
+
+
+    collapsed_expression <-
+        matrix(
+            NA_real_,
+            nrow =
+                length(
+                    unique_genes
+                ),
+            ncol =
+                ncol(
+                    gse12_expression
+                ),
+            dimnames =
+                list(
+                    unique_genes,
+                    colnames(
+                        gse12_expression
+                    )
+                )
+        )
+
+
+    for (
+        i in seq_along(
+            unique_genes
+        )
+    ) {
+
+        current_gene <-
+            unique_genes[
+                i
+            ]
+
+
+        current_rows <-
+            which(
+                rownames(
+                    gse12_expression
+                ) ==
+                    current_gene
+            )
+
+
+        if (
+            length(
+                current_rows
+            ) ==
+                1
+        ) {
+
+            collapsed_expression[
+                i,
+            ] <-
+                gse12_expression[
+                    current_rows,
+                ]
+
+        } else {
+
+            collapsed_expression[
+                i,
+            ] <-
+                apply(
+                    gse12_expression[
+                        current_rows,
+                        ,
+                        drop = FALSE
+                    ],
+                    2,
+                    median,
+                    na.rm = TRUE
+                )
+
+        }
+
+    }
+
+
+    gse12_expression <-
+        collapsed_expression
+
+}
+
+
+cat(
+    "Unique genes after duplicate handling: ",
+    nrow(
+        gse12_expression
+    ),
+    "\n",
+    sep = ""
+)
+
+
+# ============================================================
+# 12.9 — DEFINE REQUIRED PATHWAYS
+# ============================================================
+
+available_pathways <-
+    names(
+        final_gene_sets
+    )
+
+
+find_pathway_name <-
+    function(
+        exact_candidates,
+        pattern_candidates,
+        label
+    ) {
+
+        exact_match <-
+            exact_candidates[
+                exact_candidates %in%
+                    available_pathways
+            ]
+
+
+        if (
+            length(
+                exact_match
+            ) > 0
+        ) {
+
+            return(
+                exact_match[
+                    1
+                ]
+            )
+
+        }
+
+
+        for (
+            current_pattern in
+            pattern_candidates
+        ) {
+
+            matches <-
+                available_pathways[
+                    grepl(
+                        current_pattern,
+                        available_pathways,
+                        ignore.case =
+                            TRUE
+                    )
+                ]
+
+
+            if (
+                length(
+                    matches
+                ) ==
+                    1
+            ) {
+
+                return(
+                    matches[
+                        1
+                    ]
+                )
+
+            }
+
+            if (
+                length(
+                    matches
+                ) >
+                    1
+            ) {
+
+                stop(
+                    paste0(
+                        "Multiple pathways matched ",
+                        label,
+                        ": ",
+                        paste(
+                            matches,
+                            collapse = ", "
+                        )
+                    )
+                )
+
+            }
+
+        }
+
+
+        stop(
+            paste0(
+                "Could not identify pathway: ",
+                label
+            )
+        )
+
+    }
+
+
+lipid_pathway_name <-
+    find_pathway_name(
+        c(
+            "HALLMARK_FATTY_ACID_METABOLISM"
+        ),
+        c(
+            "^HALLMARK_FATTY_ACID_METABOLISM$",
+            "FATTY.*ACID.*METABOL"
+        ),
+        "fatty-acid metabolism"
+    )
+
+
+hr_pathway_name <-
+    find_pathway_name(
+        c(
+            "REACTOME_HOMOLOGOUS_RECOMBINATION_REPAIR_OF_REPLICATION_INDEPENDENT_DOUBLE_STRAND_BREAKS",
+            "REACTOME_HOMOLOGOUS_RECOMBINATION"
+        ),
+        c(
+            "HOMOLOGOUS.*RECOMBINATION"
+        ),
+        "homologous recombination"
+    )
+
+
+mmr_pathway_name <-
+    find_pathway_name(
+        c(
+            "REACTOME_MISMATCH_REPAIR"
+        ),
+        c(
+            "MISMATCH.*REPAIR"
+        ),
+        "mismatch repair"
+    )
+
+
+ber_pathway_name <-
+    find_pathway_name(
+        c(
+            "REACTOME_BASE_EXCISION_REPAIR"
+        ),
+        c(
+            "BASE.*EXCISION.*REPAIR"
+        ),
+        "base excision repair"
+    )
+
+
+dna_repair_pathway_name <-
+    find_pathway_name(
+        c(
+            "HALLMARK_DNA_REPAIR"
+        ),
+        c(
+            "^HALLMARK_DNA_REPAIR$"
+        ),
+        "HALLMARK DNA repair"
+    )
+
+
+dsb_pathway_name <-
+    find_pathway_name(
+        c(
+            "REACTOME_DOUBLE_STRAND_BREAK_REPAIR"
+        ),
+        c(
+            "DOUBLE.*STRAND.*BREAK.*REPAIR"
+        ),
+        "double-strand break repair"
+    )
+
+
+nhej_pathway_name <-
+    find_pathway_name(
+        c(
+            "REACTOME_NONHOMOLOGOUS_END_JOINING_NHEJ",
+            "REACTOME_NON_HOMOLOGOUS_END_JOINING_NHEJ"
+        ),
+        c(
+            "NON.?HOMOLOGOUS.*END.*JOIN",
+            "NHEJ"
+        ),
+        "NHEJ"
+    )
+
+
+p53_pathway_name <-
+    find_pathway_name(
+        c(
+            "HALLMARK_P53_PATHWAY"
+        ),
+        c(
+            "P53.*PATHWAY"
+        ),
+        "p53 pathway"
+    )
+
+
+cat(
+    "\n============================================================\n"
+)
+
+cat(
+    "PATHWAYS SELECTED\n"
+)
+
+cat(
+    "============================================================\n\n"
+)
+
+cat(
+    "Lipid: ",
+    lipid_pathway_name,
+    "\n",
+    sep = ""
+)
+
+cat(
+    "HR: ",
+    hr_pathway_name,
+    "\n",
+    sep = ""
+)
+
+cat(
+    "MMR: ",
+    mmr_pathway_name,
+    "\n",
+    sep = ""
+)
+
+cat(
+    "BER: ",
+    ber_pathway_name,
+    "\n",
+    sep = ""
+)
+
+cat(
+    "DNA repair: ",
+    dna_repair_pathway_name,
+    "\n",
+    sep = ""
+)
+
+cat(
+    "DSB repair: ",
+    dsb_pathway_name,
+    "\n",
+    sep = ""
+)
+
+cat(
+    "NHEJ: ",
+    nhej_pathway_name,
+    "\n",
+    sep = ""
+)
+
+cat(
+    "p53: ",
+    p53_pathway_name,
+    "\n",
+    sep = ""
+)
+
+
+# ============================================================
+# 12.10 — CREATE GENE-SET LIST
+# ============================================================
+
+gse12_gene_sets <-
+    list(
+        HALLMARK_FATTY_ACID_METABOLISM =
+            getElement(
+                final_gene_sets,
+                lipid_pathway_name
+            ),
+        HR =
+            getElement(
+                final_gene_sets,
+                hr_pathway_name
+            ),
+        MMR =
+            getElement(
+                final_gene_sets,
+                mmr_pathway_name
+            ),
+        BER =
+            getElement(
+                final_gene_sets,
+                ber_pathway_name
+            ),
+        DNA_REPAIR =
+            getElement(
+                final_gene_sets,
+                dna_repair_pathway_name
+            ),
+        DSB_REPAIR =
+            getElement(
+                final_gene_sets,
+                dsb_pathway_name
+            ),
+        NHEJ =
+            getElement(
+                final_gene_sets,
+                nhej_pathway_name
+            ),
+        P53 =
+            getElement(
+                final_gene_sets,
+                p53_pathway_name
+            )
+    )
+
+
+for (
+    i in seq_along(
+        gse12_gene_sets
+    )
+) {
+
+    current_genes <-
+        getElement(
+            gse12_gene_sets,
+            i
+        )
+
+
+    current_genes <-
+        unique(
+            toupper(
+                trimws(
+                    as.character(
+                        current_genes
+                    )
+                )
+            )
+        )
+
+
+    current_genes <-
+        current_genes[
+            !is.na(
+                current_genes
+            ) &
+                current_genes != ""
+        ]
+
+
+    names(
+        gse12_gene_sets
+    )[i] <-
+        names(
+            gse12_gene_sets
+        )[i]
+
+
+    gse12_gene_sets <-
+        within(
+            gse12_gene_sets,
+            {
+                assign(
+                    names(
+                        gse12_gene_sets
+                    )[i],
+                    current_genes
+                )
+            }
+        )
+
+}
+
+
+# ============================================================
+# 12.11 — GENE-SET COVERAGE
+# ============================================================
+
+gse12_pathway_coverage <-
+    data.frame(
+        Pathway =
+            names(
+                gse12_gene_sets
+            ),
+        Genes_in_gene_set =
+            vapply(
+                gse12_gene_sets,
+                length,
+                integer(1)
+            ),
+        Genes_present =
+            vapply(
+                gse12_gene_sets,
+                function(
+                    genes
+                ) {
+
+                    sum(
+                        genes %in%
+                            rownames(
+                                gse12_expression
+                            )
+                    )
+
+                },
+                integer(1)
+            ),
+        stringsAsFactors =
+            FALSE
+    )
+
+
+gse12_pathway_coverage$Percent_covered <-
+    100 *
+    gse12_pathway_coverage$Genes_present /
+    gse12_pathway_coverage$Genes_in_gene_set
+
+
+cat(
+    "\n============================================================\n"
+)
+
+cat(
+    "GSE76427 GENE-SET COVERAGE\n"
+)
+
+cat(
+    "============================================================\n\n"
+)
+
+print(
+    gse12_pathway_coverage,
+    row.names = FALSE
+)
+
+
+# ============================================================
+# 12.12 — GSVA
+# ============================================================
+
+if (
+    !requireNamespace(
+        "GSVA",
+        quietly = TRUE
+    )
+) {
+
+    stop(
+        "GSVA package is required."
+    )
+
+}
+
+
+cat(
+    "\nCalculating GSE76427 GSVA scores...\n"
+)
+
+
+gse12_gsva_parameter <-
+    GSVA::gsvaParam(
+        exprData =
+            gse12_expression,
+        geneSets =
+            gse12_gene_sets,
+        kcdf =
+            "Gaussian"
+    )
+
+
+gse12_pathway_scores <-
+    GSVA::gsva(
+        gse12_gsva_parameter,
+        verbose =
+            FALSE
+    )
+
+
+gse12_pathway_scores <-
+    as.matrix(
+        gse12_pathway_scores
+    )
+
+
+if (
+    ncol(
+        gse12_pathway_scores
+    ) !=
+        115
+) {
+
+    stop(
+        "GSVA did not produce 115 samples."
+    )
+
+}
+
+
+if (
+    !identical(
+        colnames(
+            gse12_expression
+        ),
+        colnames(
+            gse12_pathway_scores
+        )
+    )
+) {
+
+    stop(
+        "Expression and GSVA sample identifiers do not match."
+    )
+
+}
+
+
+cat(
+    "GSVA completed successfully.\n"
+)
+
+
+# ============================================================
+# 12.13 — EXTRACT SCORES
+# ============================================================
+
+gse12_lipid_score <-
+    as.numeric(
+        gse12_pathway_scores[
+            "HALLMARK_FATTY_ACID_METABOLISM",
+            ]
+    )
+
+
+gse12_hr_score <-
+    as.numeric(
+        gse12_pathway_scores[
+            "HR",
+            ]
+    )
+
+
+gse12_mmr_score <-
+    as.numeric(
+        gse12_pathway_scores[
+            "MMR",
+            ]
+    )
+
+
+gse12_ber_score <-
+    as.numeric(
+        gse12_pathway_scores[
+            "BER",
+            ]
+    )
+
+
+gse12_dna_repair_score <-
+    as.numeric(
+        gse12_pathway_scores[
+            "DNA_REPAIR",
+            ]
+    )
+
+
+gse12_dsb_score <-
+    as.numeric(
+        gse12_pathway_scores[
+            "DSB_REPAIR",
+            ]
+    )
+
+
+gse12_nhej_score <-
+    as.numeric(
+        gse12_pathway_scores[
+            "NHEJ",
+            ]
+    )
+
+
+gse12_p53_score <-
+    as.numeric(
+        gse12_pathway_scores[
+            "P53",
+            ]
+    )
+
+
+# ============================================================
+# 12.14 — COMPOSITE DDR SCORE
+# ============================================================
+
+gse12_ddr_components <-
+    rbind(
+        HR =
+            gse12_hr_score,
+        MMR =
+            gse12_mmr_score,
+        BER =
+            gse12_ber_score,
+        DNA_REPAIR =
+            gse12_dna_repair_score,
+        DSB_REPAIR =
+            gse12_dsb_score,
+        NHEJ =
+            gse12_nhej_score,
+        P53 =
+            gse12_p53_score
+    )
+
+
+gse12_ddr_score <-
+    colMeans(
+        gse12_ddr_components,
+        na.rm =
+            TRUE
+    )
+
+
+names(
+    gse12_lipid_score
+) <-
+    colnames(
+        gse12_pathway_scores
+    )
+
+
+names(
+    gse12_hr_score
+) <-
+    colnames(
+        gse12_pathway_scores
+    )
+
+
+names(
+    gse12_ddr_score
+) <-
+    colnames(
+        gse12_pathway_scores
+    )
+
+
+names(
+    gse12_nhej_score
+) <-
+    colnames(
+        gse12_pathway_scores
+    )
+
+
+# ============================================================
+# 12.15 — PRIMARY CORRELATIONS
+# ============================================================
+
+gse12_targets <-
+    list(
+        HR =
+            gse12_hr_score,
+        DDR =
+            gse12_ddr_score,
+        NHEJ =
+            gse12_nhej_score
+    )
+
+
+gse12_main_correlations <-
+    data.frame(
+        Pathway =
+            names(
+                gse12_targets
+            ),
+        N =
+            NA_integer_,
+        Spearman_rho =
+            NA_real_,
+        P_value =
+            NA_real_,
+        stringsAsFactors =
+            FALSE
+    )
+
+
+for (
+    i in seq_along(
+        gse12_targets
+    )
+) {
+
+    current_score <-
+        getElement(
+            gse12_targets,
+            i
+        )
+
+
+    valid <-
+        is.finite(
+            gse12_lipid_score
+        ) &
+        is.finite(
+            current_score
+        )
+
+
+    current_test <-
+        suppressWarnings(
+            cor.test(
+                gse12_lipid_score[
+                    valid
+                ],
+                current_score[
+                    valid
+                ],
+                method =
+                    "spearman",
+                exact =
+                    FALSE
+            )
+        )
+
+
+    gse12_main_correlations$N[
+        i
+    ] <-
+        sum(
+            valid
+        )
+
+
+    gse12_main_correlations$Spearman_rho[
+        i
+    ] <-
+        as.numeric(
+            current_test$estimate
+        )
+
+
+    gse12_main_correlations$P_value[
+        i
+    ] <-
+        current_test$p.value
+
+}
+
+
+gse12_main_correlations$BH_FDR <-
+    p.adjust(
+        gse12_main_correlations$P_value,
+        method =
+            "BH"
+    )
+
+
+# ============================================================
+# 12.16 — INDIVIDUAL DDR COMPONENT CORRELATIONS
+# ============================================================
+
+gse12_components <-
+    list(
+        HR =
+            gse12_hr_score,
+        MMR =
+            gse12_mmr_score,
+        BER =
+            gse12_ber_score,
+        DNA_REPAIR =
+            gse12_dna_repair_score,
+        DSB_REPAIR =
+            gse12_dsb_score,
+        NHEJ =
+            gse12_nhej_score,
+        P53 =
+            gse12_p53_score
+    )
+
+
+gse12_component_correlations <-
+    data.frame(
+        Pathway =
+            names(
+                gse12_components
+            ),
+        N =
+            NA_integer_,
+        Spearman_rho =
+            NA_real_,
+        P_value =
+            NA_real_,
+        stringsAsFactors =
+            FALSE
+    )
+
+
+for (
+    i in seq_along(
+        gse12_components
+    )
+) {
+
+    current_score <-
+        getElement(
+            gse12_components,
+            i
+        )
+
+
+    valid <-
+        is.finite(
+            gse12_lipid_score
+        ) &
+        is.finite(
+            current_score
+        )
+
+
+    current_test <-
+        suppressWarnings(
+            cor.test(
+                gse12_lipid_score[
+                    valid
+                ],
+                current_score[
+                    valid
+                ],
+                method =
+                    "spearman",
+                exact =
+                    FALSE
+            )
+        )
+
+
+    gse12_component_correlations$N[
+        i
+    ] <-
+        sum(
+            valid
+        )
+
+
+    gse12_component_correlations$Spearman_rho[
+        i
+    ] <-
+        as.numeric(
+            current_test$estimate
+        )
+
+
+    gse12_component_correlations$P_value[
+        i
+    ] <-
+        current_test$p.value
+
+}
+
+
+gse12_component_correlations$BH_FDR <-
+    p.adjust(
+        gse12_component_correlations$P_value,
+        method =
+            "BH"
+    )
+
+
+# ============================================================
+# 12.17 — LIPID HIGH / LOW
+# ============================================================
+
+gse12_lipid_median <-
+    median(
+        gse12_lipid_score,
+        na.rm =
+            TRUE
+    )
+
+
+gse12_lipid_group <-
+    ifelse(
+        gse12_lipid_score >=
+            gse12_lipid_median,
+        "Lipid-high",
+        "Lipid-low"
+    )
+
+
+gse12_lipid_group <-
+    factor(
+        gse12_lipid_group,
+        levels =
+            c(
+                "Lipid-low",
+                "Lipid-high"
+            )
+    )
+
+
+# ============================================================
+# 12.18 — WILCOXON TESTS
+# ============================================================
+
+gse12_wilcox_scores <-
+    list(
+        HR =
+            gse12_hr_score,
+        DDR =
+            gse12_ddr_score,
+        NHEJ =
+            gse12_nhej_score
+    )
+
+
+gse12_wilcox_results <-
+    data.frame(
+        Pathway =
+            names(
+                gse12_wilcox_scores
+            ),
+        Lipid_low_median =
+            NA_real_,
+        Lipid_high_median =
+            NA_real_,
+        P_value =
+            NA_real_,
+        stringsAsFactors =
+            FALSE
+    )
+
+
+for (
+    i in seq_along(
+        gse12_wilcox_scores
+    )
+) {
+
+    current_score <-
+        getElement(
+            gse12_wilcox_scores,
+            i
+        )
+
+
+    low_values <-
+        current_score[
+            gse12_lipid_group ==
+                "Lipid-low"
+        ]
+
+
+    high_values <-
+        current_score[
+            gse12_lipid_group ==
+                "Lipid-high"
+        ]
+
+
+    current_test <-
+        wilcox.test(
+            low_values,
+            high_values,
+            exact =
+                FALSE
+        )
+
+
+    gse12_wilcox_results$Lipid_low_median[
+        i
+    ] <-
+        median(
+            low_values,
+            na.rm =
+                TRUE
+        )
+
+
+    gse12_wilcox_results$Lipid_high_median[
+        i
+    ] <-
+        median(
+            high_values,
+            na.rm =
+                TRUE
+        )
+
+
+    gse12_wilcox_results$P_value[
+        i
+    ] <-
+        current_test$p.value
+
+}
+
+
+gse12_wilcox_results$BH_FDR <-
+    p.adjust(
+        gse12_wilcox_results$P_value,
+        method =
+            "BH"
+    )
+
+
+# ============================================================
+# 12.19 — PRINT PRIMARY RESULTS
+# ============================================================
+
+cat(
+    "\n============================================================\n"
+)
+
+cat(
+    "STEP 12 — GSE76427 PRIMARY VALIDATION RESULTS\n"
+)
+
+cat(
+    "============================================================\n\n"
+)
+
+cat(
+    "Lipid vs HR / DDR / NHEJ:\n\n"
+)
+
+print(
+    gse12_main_correlations,
+    row.names =
+        FALSE
+)
+
+
+cat(
+    "\nLipid vs individual DDR components:\n\n"
+)
+
+print(
+    gse12_component_correlations,
+    row.names =
+        FALSE
+)
+
+
+cat(
+    "\nLipid-high vs lipid-low:\n\n"
+)
+
+print(
+    gse12_wilcox_results,
+    row.names =
+        FALSE
+)
+
+
+# ============================================================
+# 12.20 — SAVE RESULTS
+# ============================================================
+
+if (
+    !dir.exists(
+        "results"
+    )
+) {
+
+    dir.create(
+        "results",
+        recursive =
+            TRUE
+    )
+
+}
+
+
+gse12_validation_scores <-
+    data.frame(
+        Sample =
+            colnames(
+                gse12_pathway_scores
+            ),
+        Lipid_score =
+            gse12_lipid_score,
+        HR_score =
+            gse12_hr_score,
+        DDR_score =
+            gse12_ddr_score,
+        NHEJ_score =
+            gse12_nhej_score,
+        MMR_score =
+            gse12_mmr_score,
+        BER_score =
+            gse12_ber_score,
+        DNA_repair_score =
+            gse12_dna_repair_score,
+        DSB_repair_score =
+            gse12_dsb_score,
+        P53_score =
+            gse12_p53_score,
+        Lipid_group =
+            gse12_lipid_group,
+        stringsAsFactors =
+            FALSE
+    )
+
+
+write.csv(
+    gse12_validation_scores,
+    file =
+        file.path(
+            "results",
+            "Step12_GSE76427_pathway_validation_scores.csv"
+        ),
+    row.names =
+        FALSE
+)
+
+
+write.csv(
+    gse12_main_correlations,
+    file =
+        file.path(
+            "results",
+            "Step12_GSE76427_lipid_HR_DDR_NHEJ_correlations.csv"
+        ),
+    row.names =
+        FALSE
+)
+
+
+write.csv(
+    gse12_component_correlations,
+    file =
+        file.path(
+            "results",
+            "Step12_GSE76427_lipid_DDR_component_correlations.csv"
+        ),
+    row.names =
+        FALSE
+)
+
+
+write.csv(
+    gse12_wilcox_results,
+    file =
+        file.path(
+            "results",
+            "Step12_GSE76427_lipid_high_low_Wilcoxon_results.csv"
+        ),
+    row.names =
+        FALSE
+)
+
+
+write.csv(
+    gse12_pathway_coverage,
+    file =
+        file.path(
+            "results",
+            "Step12_GSE76427_pathway_gene_set_coverage.csv"
+        ),
+    row.names =
+        FALSE
+)
+
+
+save(
+    gse12_expression,
+    gse12_pathway_scores,
+    gse12_lipid_score,
+    gse12_hr_score,
+    gse12_ddr_score,
+    gse12_nhej_score,
+    gse12_mmr_score,
+    gse12_ber_score,
+    gse12_dna_repair_score,
+    gse12_dsb_score,
+    gse12_p53_score,
+    gse12_ddr_components,
+    gse12_lipid_group,
+    gse12_main_correlations,
+    gse12_component_correlations,
+    gse12_wilcox_results,
+    gse12_pathway_coverage,
+    file =
+        file.path(
+            "results",
+            "Step12_GSE76427_pathway_validation.RData"
+        )
+)
+
+
+# ============================================================
+# 12.21 — FINAL QC
+# ============================================================
+
+if (
+    ncol(
+        gse12_expression
+    ) !=
+        115
+) {
+
+    stop(
+        "FINAL QC FAILED: expression matrix does not contain 115 samples."
+    )
+
+}
+
+
+if (
+    ncol(
+        gse12_pathway_scores
+    ) !=
+        115
+) {
+
+    stop(
+        "FINAL QC FAILED: GSVA matrix does not contain 115 samples."
+    )
+
+}
+
+
+if (
+    !identical(
+        colnames(
+            gse12_expression
+        ),
+        colnames(
+            gse12_pathway_scores
+        )
+    )
+) {
+
+    stop(
+        "FINAL QC FAILED: expression and GSVA sample identifiers differ."
+    )
+
+}
+
+
+if (
+    length(
+        gse12_lipid_score
+    ) !=
+        115
+) {
+
+    stop(
+        "FINAL QC FAILED: lipid score does not contain 115 samples."
+    )
+
+}
+
+
+if (
+    length(
+        gse12_hr_score
+    ) !=
+        115
+) {
+
+    stop(
+        "FINAL QC FAILED: HR score does not contain 115 samples."
+    )
+
+}
+
+
+if (
+    length(
+        gse12_ddr_score
+    ) !=
+        115
+) {
+
+    stop(
+        "FINAL QC FAILED: DDR score does not contain 115 samples."
+    )
+
+}
+
+
+if (
+    length(
+        gse12_nhej_score
+    ) !=
+        115
+) {
+
+    stop(
+        "FINAL QC FAILED: NHEJ score does not contain 115 samples."
+    )
+
+}
+
+
+cat(
+    "\n============================================================\n"
+)
+
+cat(
+    "STEP 12 COMPLETED SUCCESSFULLY\n"
+)
+
+cat(
+    "============================================================\n\n"
+)
+
+cat(
+    "Validation cohort: GSE76427\n"
+)
+
+cat(
+    "Samples: 115\n"
+)
+
+cat(
+    "\nPrimary correlation results:\n\n"
+)
+
+print(
+    gse12_main_correlations,
+    row.names =
+        FALSE
+)
+
+cat(
+    "\nResults saved to the results/ directory.\n"
+)
+
+cat(
+    "\n============================================================\n"
+)
