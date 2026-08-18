@@ -1317,3 +1317,760 @@ cat(
     sep = ""
 )
 cat("============================================================\n")
+
+# ============================================================
+# STEP 11 FIGURES — FINAL FIGURE GENERATION
+#
+# Uses the already completed Step 11 results.
+# Does NOT rerun correlations.
+# Does NOT recalculate the lipid score.
+# Does NOT modify gene_results.
+#
+# Outputs:
+# 1. Volcano plot
+# 2. Full HR/DDR correlation heatmap
+# 3. Significant HR/DDR correlation heatmap, if applicable
+# ============================================================
+
+cat("\n============================================================\n")
+cat("STEP 11 — FIGURE GENERATION\n")
+cat("============================================================\n\n")
+
+
+# ------------------------------------------------------------
+# 1. Confirm existing Step 11 results
+# ------------------------------------------------------------
+
+if (
+    !exists("gene_results")
+) {
+
+    stop(
+        "gene_results is not present in the current R session. ",
+        "The previously saved Step 11 RData file will be loaded."
+    )
+
+}
+
+
+# ------------------------------------------------------------
+# 2. Confirm results directory
+# ------------------------------------------------------------
+
+if (
+    !dir.exists(
+        "results"
+    )
+) {
+
+    dir.create(
+        "results",
+        recursive = TRUE
+    )
+
+}
+
+
+# ------------------------------------------------------------
+# 3. Check required columns
+# ------------------------------------------------------------
+
+required_columns <-
+    c(
+        "Gene",
+        "Spearman_rho",
+        "P_value",
+        "BH_FDR"
+    )
+
+missing_columns <-
+    setdiff(
+        required_columns,
+        colnames(
+            gene_results
+        )
+    )
+
+if (
+    length(
+        missing_columns
+    ) > 0
+) {
+
+    stop(
+        paste0(
+            "The existing gene_results object is missing: ",
+            paste(
+                missing_columns,
+                collapse = ", "
+            )
+        )
+    )
+
+}
+
+
+# ------------------------------------------------------------
+# 4. Load plotting packages
+# ------------------------------------------------------------
+
+if (
+    !requireNamespace(
+        "ggplot2",
+        quietly = TRUE
+    )
+) {
+
+    stop(
+        "ggplot2 is required. Please install ggplot2 and rerun this figure block."
+    )
+
+}
+
+if (
+    !requireNamespace(
+        "pheatmap",
+        quietly = TRUE
+    )
+) {
+
+    stop(
+        "pheatmap is required. Please install pheatmap and rerun this figure block."
+    )
+
+}
+
+library(
+    ggplot2
+)
+
+library(
+    pheatmap
+)
+
+
+# ============================================================
+# FIGURE 1 — VOLCANO PLOT
+# ============================================================
+
+cat(
+    "Generating volcano plot...\n"
+)
+
+
+volcano_data <-
+    gene_results
+
+
+# ------------------------------------------------------------
+# Calculate -log10 BH-FDR
+# ------------------------------------------------------------
+
+volcano_data$neg_log10_BH_FDR <-
+    NA_real_
+
+
+valid_volcano <-
+    !is.na(
+        volcano_data$BH_FDR
+    ) &
+    is.finite(
+        volcano_data$BH_FDR
+    ) &
+    volcano_data$BH_FDR > 0
+
+
+volcano_data$neg_log10_BH_FDR[
+    valid_volcano
+] <-
+    -log10(
+        volcano_data$BH_FDR[
+            valid_volcano
+        ]
+    )
+
+
+# ------------------------------------------------------------
+# Define volcano groups
+# ------------------------------------------------------------
+
+volcano_data$Volcano_group <-
+    "Non-significant"
+
+
+volcano_data$Volcano_group[
+    !is.na(
+        volcano_data$BH_FDR
+    ) &
+        volcano_data$BH_FDR < 0.05 &
+        volcano_data$Spearman_rho > 0
+] <-
+    "Significantly positive"
+
+
+volcano_data$Volcano_group[
+    !is.na(
+        volcano_data$BH_FDR
+    ) &
+        volcano_data$BH_FDR < 0.05 &
+        volcano_data$Spearman_rho < 0
+] <-
+    "Significantly negative"
+
+
+# ------------------------------------------------------------
+# Prevent infinite y-values
+# ------------------------------------------------------------
+
+finite_volcano <-
+    is.finite(
+        volcano_data$Spearman_rho
+    ) &
+    is.finite(
+        volcano_data$neg_log10_BH_FDR
+    )
+
+
+volcano_data_plot <-
+    volcano_data[
+        finite_volcano,
+        ,
+        drop = FALSE
+    ]
+
+
+if (
+    nrow(
+        volcano_data_plot
+    ) == 0
+) {
+
+    stop(
+        "No valid data are available for the volcano plot."
+    )
+
+}
+
+
+# ------------------------------------------------------------
+# Create volcano plot
+# ------------------------------------------------------------
+
+volcano_plot <-
+    ggplot(
+        volcano_data_plot,
+        aes(
+            x =
+                Spearman_rho,
+            y =
+                neg_log10_BH_FDR,
+            shape =
+                Volcano_group
+        )
+    ) +
+
+    geom_point(
+        size = 3,
+        alpha = 0.85
+    ) +
+
+    geom_vline(
+        xintercept = 0,
+        linetype = "dashed"
+    ) +
+
+    geom_hline(
+        yintercept =
+            -log10(0.05),
+        linetype = "dashed"
+    ) +
+
+    labs(
+        title =
+            "Expanded HR/DDR Gene Correlation with Lipid Metabolism",
+        subtitle =
+            "HALLMARK_FATTY_ACID_METABOLISM pathway score",
+        x =
+            "Spearman correlation coefficient (rho)",
+        y =
+            "-log10(BH-FDR)",
+        shape =
+            "Association"
+    ) +
+
+    theme_classic(
+        base_size = 14
+    ) +
+
+    theme(
+        plot.title =
+            element_text(
+                face = "bold",
+                size = 16
+            ),
+        plot.subtitle =
+            element_text(
+                size = 11
+            ),
+        axis.title =
+            element_text(
+                face = "bold"
+            ),
+        legend.title =
+            element_text(
+                face = "bold"
+            ),
+        legend.position =
+            "right"
+    )
+
+
+# ------------------------------------------------------------
+# Save volcano plot
+# ------------------------------------------------------------
+
+volcano_file <-
+    file.path(
+        "results",
+        "Step11_2.5_expanded_HR_gene_lipid_volcano.png"
+    )
+
+
+ggsave(
+    filename =
+        volcano_file,
+    plot =
+        volcano_plot,
+    width =
+        10,
+    height =
+        8,
+    units =
+        "in",
+    dpi =
+        300,
+    bg =
+        "white"
+)
+
+
+cat(
+    "Volcano plot saved:\n",
+    normalizePath(
+        volcano_file,
+        winslash = "/",
+        mustWork = FALSE
+    ),
+    "\n\n"
+)
+
+
+# ============================================================
+# FIGURE 2 — FULL HR/DDR CORRELATION HEATMAP
+# ============================================================
+
+cat(
+    "Generating full HR/DDR correlation heatmap...\n"
+)
+
+
+heatmap_data <-
+    gene_results[
+        !is.na(
+            gene_results$Spearman_rho
+        ) &
+        is.finite(
+            gene_results$Spearman_rho
+        ),
+        ,
+        drop = FALSE
+    ]
+
+
+if (
+    nrow(
+        heatmap_data
+    ) == 0
+) {
+
+    stop(
+        "No valid correlation coefficients are available for the heatmap."
+    )
+
+}
+
+
+# ------------------------------------------------------------
+# Order genes from negative to positive correlation
+# ------------------------------------------------------------
+
+heatmap_data <-
+    heatmap_data[
+        order(
+            heatmap_data$Spearman_rho,
+            decreasing = FALSE
+        ),
+        ,
+        drop = FALSE
+    ]
+
+
+# ------------------------------------------------------------
+# Create one-row correlation matrix
+# ------------------------------------------------------------
+
+heatmap_matrix <-
+    matrix(
+        heatmap_data$Spearman_rho,
+        nrow = 1
+    )
+
+
+colnames(
+    heatmap_matrix
+) <-
+    heatmap_data$Gene
+
+
+rownames(
+    heatmap_matrix
+) <-
+    "Spearman rho"
+
+
+# ------------------------------------------------------------
+# Dynamic figure width
+# ------------------------------------------------------------
+
+heatmap_width <-
+    max(
+        14,
+        min(
+            30,
+            0.28 *
+                ncol(
+                    heatmap_matrix
+                ) +
+                6
+        )
+    )
+
+
+# ------------------------------------------------------------
+# Save full heatmap
+# ------------------------------------------------------------
+
+full_heatmap_file <-
+    file.path(
+        "results",
+        "Step11_2.5_expanded_HR_gene_lipid_heatmap.png"
+    )
+
+
+png(
+    filename =
+        full_heatmap_file,
+    width =
+        heatmap_width,
+    height =
+        5.5,
+    units =
+        "in",
+    res =
+        300
+)
+
+
+pheatmap(
+    heatmap_matrix,
+    cluster_rows =
+        FALSE,
+    cluster_cols =
+        FALSE,
+    show_rownames =
+        TRUE,
+    show_colnames =
+        TRUE,
+    angle_col =
+        90,
+    fontsize =
+        9,
+    fontsize_col =
+        7,
+    display_numbers =
+        TRUE,
+    number_format =
+        "%.2f",
+    border_color =
+        NA,
+    main =
+        "Expanded HR/DDR Gene Correlation with Lipid Metabolism"
+)
+
+
+dev.off()
+
+
+cat(
+    "Full heatmap saved:\n",
+    normalizePath(
+        full_heatmap_file,
+        winslash = "/",
+        mustWork = FALSE
+    ),
+    "\n\n"
+)
+
+
+# ============================================================
+# FIGURE 3 — SIGNIFICANT-GENE HEATMAP
+# ============================================================
+
+cat(
+    "Checking for significant genes...\n"
+)
+
+
+significant_heatmap_data <-
+    gene_results[
+        !is.na(
+            gene_results$BH_FDR
+        ) &
+        gene_results$BH_FDR < 0.05 &
+        !is.na(
+            gene_results$Spearman_rho
+        ) &
+        is.finite(
+            gene_results$Spearman_rho
+        ),
+        ,
+        drop = FALSE
+    ]
+
+
+if (
+    nrow(
+        significant_heatmap_data
+    ) == 0
+) {
+
+    cat(
+        "No genes have BH-FDR < 0.05.\n"
+    )
+
+    cat(
+        "Therefore, a significant-gene heatmap was not generated.\n\n"
+    )
+
+} else {
+
+    significant_heatmap_data <-
+        significant_heatmap_data[
+            order(
+                significant_heatmap_data$Spearman_rho,
+                decreasing = FALSE
+            ),
+            ,
+            drop = FALSE
+        ]
+
+
+    significant_heatmap_matrix <-
+        matrix(
+            significant_heatmap_data$Spearman_rho,
+            nrow = 1
+        )
+
+
+    colnames(
+        significant_heatmap_matrix
+    ) <-
+        significant_heatmap_data$Gene
+
+
+    rownames(
+        significant_heatmap_matrix
+    ) <-
+        "Spearman rho"
+
+
+    significant_heatmap_width <-
+        max(
+            10,
+            min(
+                30,
+                0.35 *
+                    ncol(
+                        significant_heatmap_matrix
+                    ) +
+                    6
+            )
+        )
+
+
+    significant_heatmap_file <-
+        file.path(
+            "results",
+            "Step11_2.5_expanded_HR_significant_gene_lipid_heatmap.png"
+        )
+
+
+    png(
+        filename =
+            significant_heatmap_file,
+        width =
+            significant_heatmap_width,
+        height =
+            5.5,
+        units =
+            "in",
+        res =
+            300
+    )
+
+
+    pheatmap(
+        significant_heatmap_matrix,
+        cluster_rows =
+            FALSE,
+        cluster_cols =
+            FALSE,
+        show_rownames =
+            TRUE,
+        show_colnames =
+            TRUE,
+        angle_col =
+            90,
+        fontsize =
+            9,
+        fontsize_col =
+            8,
+        display_numbers =
+            TRUE,
+        number_format =
+            "%.2f",
+        border_color =
+            NA,
+        main =
+            "Significant HR/DDR Genes Correlated with Lipid Metabolism"
+    )
+
+
+    dev.off()
+
+
+    cat(
+        "Significant-gene heatmap saved:\n",
+        normalizePath(
+            significant_heatmap_file,
+            winslash = "/",
+            mustWork = FALSE
+        ),
+        "\n\n"
+    )
+
+}
+
+
+# ============================================================
+# FINAL FIGURE QC
+# ============================================================
+
+cat(
+    "============================================================\n"
+)
+
+cat(
+    "FIGURE GENERATION QC\n"
+)
+
+cat(
+    "============================================================\n"
+)
+
+
+figure_check <-
+    c(
+        volcano =
+            file.exists(
+                volcano_file
+            ),
+        full_heatmap =
+            file.exists(
+                full_heatmap_file
+            )
+    )
+
+
+if (
+    exists(
+        "significant_heatmap_file"
+    )
+) {
+
+    figure_check[
+        "significant_heatmap"
+    ] <-
+        file.exists(
+            significant_heatmap_file
+        )
+
+}
+
+
+print(
+    figure_check
+)
+
+
+cat(
+    "\nAll generated figure files:\n\n"
+)
+
+
+generated_figures <-
+    list.files(
+        "results",
+        pattern =
+            "^Step11.*\\.png$",
+        full.names =
+            TRUE
+    )
+
+
+if (
+    length(
+        generated_figures
+    ) > 0
+) {
+
+    print(
+        normalizePath(
+            generated_figures,
+            winslash =
+                "/",
+            mustWork =
+                FALSE
+        )
+    )
+
+} else {
+
+    stop(
+        "QC FAILED: no Step 11 PNG figures were found in results/."
+    )
+
+}
+
+
+cat(
+    "\n============================================================\n"
+)
+
+cat(
+    "STEP 11 FIGURE GENERATION COMPLETED\n"
+)
+
+cat(
+    "============================================================\n"
+)
