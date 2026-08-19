@@ -1,0 +1,582 @@
+# ============================================================
+# COMPLETE ANALYSIS CHECKPOINT — THROUGH STEP 14
+# ============================================================
+#
+# Saves:
+#   1. Complete R command history
+#   2. Complete .R script version of command history
+#   3. Entire current R workspace as one .RData file
+#   4. Every current R object separately as an .rds file
+#   5. Object inventory
+#   6. R session information
+#   7. Checkpoint date/time
+#
+# ALL FILES ARE SAVED IN:
+#   scripts/analysis_checkpoint_step14/
+#
+# ============================================================
+
+
+# ------------------------------------------------------------
+# 1. CREATE CHECKPOINT DIRECTORIES
+# ------------------------------------------------------------
+
+checkpoint_dir <- "scripts/analysis_checkpoint_step14"
+
+if (!dir.exists(checkpoint_dir)) {
+    
+    dir.create(
+        checkpoint_dir,
+        recursive = TRUE,
+        showWarnings = FALSE
+    )
+    
+}
+
+objects_dir <- file.path(
+    checkpoint_dir,
+    "individual_objects"
+)
+
+if (!dir.exists(objects_dir)) {
+    
+    dir.create(
+        objects_dir,
+        recursive = TRUE,
+        showWarnings = FALSE
+    )
+    
+}
+
+
+# ------------------------------------------------------------
+# 2. SAVE COMPLETE R COMMAND HISTORY
+# ------------------------------------------------------------
+# Saves all commands currently present in the R history.
+
+history_file <- file.path(
+    checkpoint_dir,
+    "MAFLD_HCC_complete_analysis_through_step14.Rhistory"
+)
+
+savehistory(
+    history_file
+)
+
+cat(
+    "\n============================================================\n",
+    "R COMMAND HISTORY SAVED\n",
+    "============================================================\n",
+    history_file,
+    "\n",
+    sep = ""
+)
+
+
+# ------------------------------------------------------------
+# 3. CREATE A READABLE .R SCRIPT FROM THE HISTORY
+# ------------------------------------------------------------
+
+history_lines <- readLines(
+    history_file,
+    warn = FALSE
+)
+
+script_file <- file.path(
+    checkpoint_dir,
+    "MAFLD_HCC_complete_analysis_through_step14.R"
+)
+
+writeLines(
+    history_lines,
+    script_file
+)
+
+cat(
+    "\nComplete .R script saved to:\n",
+    script_file,
+    "\n",
+    sep = ""
+)
+
+
+# ------------------------------------------------------------
+# 4. IDENTIFY ALL CURRENT R OBJECTS
+# ------------------------------------------------------------
+# Includes hidden objects because all.names = TRUE.
+
+all_objects <- ls(
+    envir = .GlobalEnv,
+    all.names = TRUE
+)
+
+cat(
+    "\nNumber of objects currently in R workspace: ",
+    length(all_objects),
+    "\n",
+    sep = ""
+)
+
+
+# ------------------------------------------------------------
+# 5. SAVE ENTIRE CURRENT WORKSPACE AS ONE RDATA FILE
+# ------------------------------------------------------------
+# This is the main complete backup.
+
+workspace_file <- file.path(
+    checkpoint_dir,
+    "MAFLD_HCC_complete_workspace_through_step14.RData"
+)
+
+save(
+    list = all_objects,
+    file = workspace_file,
+    envir = .GlobalEnv
+)
+
+cat(
+    "\n============================================================\n",
+    "COMPLETE WORKSPACE SAVED\n",
+    "============================================================\n",
+    workspace_file,
+    "\n",
+    sep = ""
+)
+
+
+# ------------------------------------------------------------
+# 6. SAVE EVERY OBJECT INDIVIDUALLY AS RDS
+# ------------------------------------------------------------
+# This allows individual objects to be restored without
+# loading the entire workspace.
+
+saved_object_names <- character(0)
+
+for (
+    obj_name in all_objects
+) {
+    
+    obj <- get(
+        obj_name,
+        envir = .GlobalEnv
+    )
+    
+    # Make object name safe for use as a filename
+    safe_name <- gsub(
+        "[^A-Za-z0-9_.-]",
+        "_",
+        obj_name
+    )
+    
+    object_file <- file.path(
+        objects_dir,
+        paste0(
+            safe_name,
+            ".rds"
+        )
+    )
+    
+    success <- tryCatch(
+        
+        {
+            
+            saveRDS(
+                obj,
+                file = object_file
+            )
+            
+            TRUE
+            
+        },
+        
+        error = function(e) {
+            
+            cat(
+                "\nCould not save object: ",
+                obj_name,
+                "\nReason: ",
+                conditionMessage(e),
+                "\n",
+                sep = ""
+            )
+            
+            FALSE
+            
+        }
+    )
+    
+    if (success) {
+        
+        saved_object_names <- c(
+            saved_object_names,
+            obj_name
+        )
+        
+    }
+}
+
+
+# ------------------------------------------------------------
+# 7. CREATE OBJECT INVENTORY
+# ------------------------------------------------------------
+
+object_inventory <- data.frame(
+    
+    Object = all_objects,
+    
+    Class = sapply(
+        all_objects,
+        function(x) {
+            
+            paste(
+                class(
+                    get(
+                        x,
+                        envir = .GlobalEnv
+                    )
+                ),
+                collapse = "; "
+            )
+            
+        }
+    ),
+    
+    Type = sapply(
+        all_objects,
+        function(x) {
+            
+            typeof(
+                get(
+                    x,
+                    envir = .GlobalEnv
+                )
+            )
+            
+        }
+    ),
+    
+    Dimensions = sapply(
+        all_objects,
+        function(x) {
+            
+            obj <- get(
+                x,
+                envir = .GlobalEnv
+            )
+            
+            if (
+                is.null(
+                    dim(obj)
+                )
+            ) {
+                
+                if (
+                    length(obj) == 1
+                ) {
+                    
+                    as.character(
+                        length(obj)
+                    )
+                    
+                } else {
+                    
+                    paste0(
+                        "length=",
+                        length(obj)
+                    )
+                    
+                }
+                
+            } else {
+                
+                paste(
+                    dim(obj),
+                    collapse = " x "
+                )
+                
+            }
+            
+        }
+    ),
+    
+    Saved_RDS =
+        all_objects %in% saved_object_names,
+    
+    stringsAsFactors = FALSE
+)
+
+
+# ------------------------------------------------------------
+# 8. SAVE OBJECT INVENTORY
+# ------------------------------------------------------------
+
+inventory_file <- file.path(
+    checkpoint_dir,
+    "object_inventory_step14.csv"
+)
+
+write.csv(
+    object_inventory,
+    inventory_file,
+    row.names = FALSE
+)
+
+cat(
+    "\nObject inventory saved to:\n",
+    inventory_file,
+    "\n",
+    sep = ""
+)
+
+
+# ------------------------------------------------------------
+# 9. SAVE SESSION INFORMATION
+# ------------------------------------------------------------
+
+session_file <- file.path(
+    checkpoint_dir,
+    "sessionInfo_step14.txt"
+)
+
+sink(
+    session_file
+)
+
+cat(
+    "============================================================\n",
+    "MAFLD-HCC ANALYSIS — SESSION INFORMATION\n",
+    "============================================================\n\n",
+    "Checkpoint: Through Step 14\n\n"
+)
+
+print(
+    sessionInfo()
+)
+
+sink()
+
+
+# ------------------------------------------------------------
+# 10. SAVE CHECKPOINT DATE AND TIME
+# ------------------------------------------------------------
+
+checkpoint_time <- Sys.time()
+
+time_file <- file.path(
+    checkpoint_dir,
+    "checkpoint_time.txt"
+)
+
+writeLines(
+    c(
+        "MAFLD-HCC analysis checkpoint",
+        "Through Step 14",
+        "",
+        paste(
+            "Checkpoint created:",
+            checkpoint_time
+        )
+    ),
+    time_file
+)
+
+
+# ------------------------------------------------------------
+# 11. CHECK IMPORTANT STEP-14 OBJECTS
+# ------------------------------------------------------------
+
+important_step14_objects <- c(
+    
+    "tcga14_results",
+    "gse14_results",
+    "concordance_table",
+    "strictly_replicated",
+    "gse14_negative",
+    "gse14_positive",
+    "genes_present",
+    "genes_missing",
+    "concordance_rho",
+    "concordance_p"
+    
+)
+
+cat(
+    "\n============================================================\n",
+    "STEP 14 OBJECT CHECK\n",
+    "============================================================\n\n"
+)
+
+for (
+    x in important_step14_objects
+) {
+    
+    if (
+        exists(
+            x,
+            envir = .GlobalEnv
+        )
+    ) {
+        
+        obj <- get(
+            x,
+            envir = .GlobalEnv
+        )
+        
+        cat(
+            x,
+            " : PRESENT | ",
+            paste(
+                class(obj),
+                collapse = ", "
+            ),
+            "\n",
+            sep = ""
+        )
+        
+    } else {
+        
+        cat(
+            x,
+            " : NOT PRESENT\n",
+            sep = ""
+        )
+        
+    }
+}
+
+
+# ------------------------------------------------------------
+# 12. FINAL VERIFICATION
+# ------------------------------------------------------------
+
+cat(
+    "\n============================================================\n",
+    "FINAL VERIFICATION\n",
+    "============================================================\n\n"
+)
+
+cat(
+    "Workspace .RData exists: ",
+    file.exists(
+        workspace_file
+    ),
+    "\n",
+    sep = ""
+)
+
+cat(
+    "Complete .R script exists: ",
+    file.exists(
+        script_file
+    ),
+    "\n",
+    sep = ""
+)
+
+cat(
+    "Rhistory exists: ",
+    file.exists(
+        history_file
+    ),
+    "\n",
+    sep = ""
+)
+
+cat(
+    "Object inventory exists: ",
+    file.exists(
+        inventory_file
+    ),
+    "\n",
+    sep = ""
+)
+
+cat(
+    "Session information exists: ",
+    file.exists(
+        session_file
+    ),
+    "\n",
+    sep = ""
+)
+
+cat(
+    "Individual RDS objects saved: ",
+    length(
+        saved_object_names
+    ),
+    "\n",
+    sep = ""
+)
+
+
+# ------------------------------------------------------------
+# 13. PRINT FINAL FILE LOCATIONS
+# ------------------------------------------------------------
+
+cat(
+    "\n============================================================\n",
+    "BACKUP LOCATIONS\n",
+    "============================================================\n\n"
+)
+
+cat(
+    "Checkpoint directory:\n",
+    normalizePath(
+        checkpoint_dir,
+        winslash = "/",
+        mustWork = FALSE
+    ),
+    "\n\n"
+)
+
+cat(
+    "Complete R script:\n",
+    script_file,
+    "\n\n"
+)
+
+cat(
+    "Complete R history:\n",
+    history_file,
+    "\n\n"
+)
+
+cat(
+    "Complete workspace:\n",
+    workspace_file,
+    "\n\n"
+)
+
+cat(
+    "Individual objects:\n",
+    objects_dir,
+    "\n\n"
+)
+
+cat(
+    "Object inventory:\n",
+    inventory_file,
+    "\n\n"
+)
+
+cat(
+    "Session information:\n",
+    session_file,
+    "\n\n"
+)
+
+
+# ------------------------------------------------------------
+# 14. FINAL SUCCESS MESSAGE
+# ------------------------------------------------------------
+
+cat(
+    "============================================================\n",
+    "BACKUP FINISHED SUCCESSFULLY\n",
+    "============================================================\n\n",
+    "Steps 1–14 have been checkpointed.\n",
+    "All current workspace objects have been saved individually\n",
+    "as .rds files as well as collectively in the .RData file.\n",
+    "============================================================\n"
+)
