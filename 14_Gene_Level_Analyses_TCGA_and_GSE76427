@@ -2586,1281 +2586,1591 @@ if (
     "\n\n"
   )
 
-
-  # ====================================================================
-  # 14.26 — FIND GSE76427 LIPID SCORE
-  # ====================================================================
-
-  cat(
-    "============================================================\n"
-  )
-
-  cat(
-    "14.26 — FIND GSE76427 LIPID SCORE\n"
-  )
-
-  cat(
-    "============================================================\n\n"
-  )
-
-
-  gse_lipid <- NULL
-
-
-  candidate_gse_lipid_objects <- c(
-
-    "gse76427_lipid_score",
-    "GSE76427_lipid_score",
-    "validation_lipid_score",
-    "gse_lipid_score",
-    "lipid_score_gse",
-    "lipid_score_validation"
-
-  )
+# ======================================================================
+# STEP 14.26 — GSE76427 INDIVIDUAL DSB GENE-LEVEL VALIDATION
+# ======================================================================
+#
+# PURPOSE:
+# Validate the TCGA individual-gene findings in GSE76427.
+#
+# IMPORTANT:
+# - Uses the EXISTING GSE76427 expression matrix from Step 12
+# - Uses the EXISTING GSE76427 lipid score from Step 12
+# - Uses the SAME expanded HR/DDR gene list used in TCGA
+# - Does NOT download GSE76427 again
+# - Does NOT remap GEO probes
+# - Does NOT create a new gene list
+# - Spearman correlation
+# - BH-FDR correction
+# - Cross-cohort directional concordance
+#
+# Expected Step 12 objects:
+#   gse12_expression
+#   gse12_lipid_score
+#
+# Expected TCGA object/file:
+#   tcga_step11_results
+# OR:
+#   results/Step11_2.5_expanded_HR_gene_lipid_correlation_results.csv
+#
+# ======================================================================
 
 
-  for (
-    obj_name in candidate_gse_lipid_objects
-  ) {
-
-    if (
-      exists(
-        obj_name
-      )
-    ) {
-
-      candidate <- get(
-        obj_name
-      )
+cat("\n============================================================\n")
+cat("STEP 14.26 — GSE76427 GENE-LEVEL VALIDATION\n")
+cat("============================================================\n\n")
 
 
-      if (
+# ======================================================================
+# 14.26.1 — CHECK REQUIRED GSE OBJECTS
+# ======================================================================
 
-        is.numeric(candidate) &&
-        !is.null(
-          names(candidate)
+required_gse_objects <- c(
+    "gse12_expression",
+    "gse12_lipid_score"
+)
+
+
+missing_gse_objects <- required_gse_objects[
+    !vapply(
+        required_gse_objects,
+        exists,
+        logical(1),
+        envir = .GlobalEnv
+    )
+]
+
+
+if (
+    length(missing_gse_objects) > 0
+) {
+
+    stop(
+        paste0(
+            "\nERROR: Required Step 12 objects are missing:\n",
+            paste(
+                missing_gse_objects,
+                collapse = ", "
+            ),
+            "\n\nRun the GSE76427 Step 12 code first.\n"
         )
-
-      ) {
-
-        gse_lipid <- candidate
-
-
-        cat(
-          "GSE76427 lipid score found:",
-          obj_name,
-          "\n\n"
-        )
-
-
-        break
-
-      }
-
-    }
-
-  }
-
-
-  # --------------------------------------------------------------------
-  # Search other lipid objects
-  # --------------------------------------------------------------------
-
-  if (
-    is.null(gse_lipid)
-  ) {
-
-    lipid_objects <- ls(
-      pattern = "lipid",
-      ignore.case = TRUE
     )
 
-
-    for (
-      obj_name in lipid_objects
-    ) {
-
-      candidate <- get(
-        obj_name
-      )
+}
 
 
-      if (
+cat(
+    "Confirmed Step 12 expression object: gse12_expression\n"
+)
 
-        is.numeric(candidate) &&
-        length(candidate) >= 20 &&
-        !is.null(
-          names(candidate)
-        )
-
-      ) {
-
-        gse_lipid <- candidate
+cat(
+    "Confirmed Step 12 lipid-score object: gse12_lipid_score\n\n"
+)
 
 
-        cat(
-          "Using lipid object:",
-          obj_name,
-          "\n\n"
-        )
+# ======================================================================
+# 14.26.2 — COPY GSE OBJECTS
+# ======================================================================
+
+gse14_expression <- as.matrix(
+    gse12_expression
+)
 
 
-        break
-
-      }
-
-    }
-
-  }
+storage.mode(
+    gse14_expression
+) <- "numeric"
 
 
-  # ====================================================================
-  # 14.27 — PREPARE GSE76427
-  # ====================================================================
+gse14_lipid_score <- as.numeric(
+    gse12_lipid_score
+)
 
-  if (
-    is.null(gse_lipid)
-  ) {
 
-    cat(
-      "GSE76427 lipid score not found.\n"
+# Preserve sample names
+names(
+    gse14_lipid_score
+) <- names(
+    gse12_lipid_score
+)
+
+
+# ======================================================================
+# 14.26.3 — BASIC GSE QC
+# ======================================================================
+
+cat(
+    "GSE76427 expression dimensions: ",
+    nrow(gse14_expression),
+    " genes x ",
+    ncol(gse14_expression),
+    " samples\n",
+    sep = ""
+)
+
+
+cat(
+    "GSE76427 lipid-score length: ",
+    length(gse14_lipid_score),
+    "\n\n",
+    sep = ""
+)
+
+
+if (
+    is.null(
+        colnames(gse14_expression)
+    )
+) {
+
+    stop(
+        "\nERROR: gse12_expression has no sample identifiers.\n"
     )
 
-    cat(
-      "TCGA analysis is complete; GSE76427 was not executed.\n\n"
+}
+
+
+if (
+    is.null(
+        names(gse14_lipid_score)
     )
+) {
 
-
-  } else {
-
-
-    # ------------------------------------------------------------------
-    # Gene IDs
-    # ------------------------------------------------------------------
-
-    if (
-
-      !is.null(
-        rownames(gse_expr)
-      ) &&
-
-        all(
-          rownames(gse_expr) != ""
-        )
-
-    ) {
-
-      gse_gene_ids <- rownames(
-        gse_expr
-      )
-
-
-    } else {
-
-      first_col <- gse_expr[, 1]
-
-
-      if (
-
-        is.character(first_col) ||
-        is.factor(first_col)
-
-      ) {
-
-        gse_gene_ids <- as.character(
-          first_col
-        )
-
-
-        gse_expr <- gse_expr[
-          ,
-          -1,
-          drop = FALSE
-        ]
-
-
-      } else {
-
-        stop(
-          "\nERROR: GSE76427 gene identifiers could not be identified.\n"
-        )
-
-      }
-
-    }
-
-
-    # ------------------------------------------------------------------
-    # Convert Ensembl if necessary
-    # ------------------------------------------------------------------
-
-    gse_gene_ids <- trimws(
-      gse_gene_ids
+    stop(
+        "\nERROR: gse12_lipid_score has no sample identifiers.\n"
     )
-
-
-    gse_ensembl <- sub(
-      "\\.[0-9]+$",
-      "",
-      gse_gene_ids
-    )
-
-
-    gse_is_ensembl <- grepl(
-      "^ENSG[0-9]+$",
-      gse_ensembl,
-      ignore.case = TRUE
-    )
-
-
-    if (
-      sum(gse_is_ensembl) > 10
-    ) {
-
-      gse_annotation <- AnnotationDbi::select(
-
-        org.Hs.eg.db,
-
-        keys = unique(
-          gse_ensembl[
-            gse_is_ensembl
-          ]
-        ),
-
-        columns = c(
-          "ENSEMBL",
-          "SYMBOL"
-        ),
-
-        keytype = "ENSEMBL"
-
-      )
-
-
-      gse_annotation <- gse_annotation[
-
-        !is.na(
-          gse_annotation$SYMBOL
-        ) &
-
-          gse_annotation$SYMBOL != "",
-
-      ]
-
-
-      gse_annotation <- gse_annotation[
-
-        !duplicated(
-          gse_annotation$ENSEMBL
-        ),
-
-      ]
-
-
-      gse_map <- setNames(
-
-        gse_annotation$SYMBOL,
-
-        gse_annotation$ENSEMBL
-
-      )
-
-
-      gse_symbols <- gse_ensembl
-
-
-      mapped_gse <-
-
-        gse_is_ensembl &
-
-        gse_ensembl %in%
-        names(
-          gse_map
-        )
-
-
-      gse_symbols[mapped_gse] <-
-
-        gse_map[
-          gse_ensembl[
-            mapped_gse
-          ]
-        ]
-
-
-    } else {
-
-      gse_symbols <- gse_gene_ids
-
-    }
-
-
-    gse_symbols <- toupper(
-      trimws(
-        gse_symbols
-      )
-    )
-
-
-    rownames(
-      gse_expr
-    ) <- gse_symbols
-
-
-    # ------------------------------------------------------------------
-    # Remove duplicated gene symbols
-    # ------------------------------------------------------------------
-
-    if (
-
-      anyDuplicated(
-        rownames(gse_expr)
-      ) > 0
-
-    ) {
-
-      gse_variance <- apply(
-
-        gse_expr,
-
-        1,
-
-        function(x) {
-
-          var(
-            as.numeric(x),
-            na.rm = TRUE
-          )
-
-        }
-
-      )
-
-
-      gse_groups <- split(
-
-        seq_len(
-          nrow(gse_expr)
-        ),
-
-        rownames(gse_expr)
-
-      )
-
-
-      gse_best <- vapply(
-
-        gse_groups,
-
-        function(idx) {
-
-          idx[
-            which.max(
-              gse_variance[idx]
-            )
-          ]
-
-        },
-
-        integer(1)
-
-      )
-
-
-      gse_expr <- gse_expr[
-        gse_best,
-        ,
-        drop = FALSE
-      ]
-
-    }
-
-
-    # ------------------------------------------------------------------
-    # Match genes
-    # ------------------------------------------------------------------
-
-    gse_gene_overlap <- intersect(
-
-      dsb_gene_universe,
-
-      rownames(gse_expr)
-
-    )
-
-
-    cat(
-      "\nGSE76427 DSB genes matched:",
-      length(gse_gene_overlap),
-      "/",
-      length(dsb_gene_universe),
-      "\n\n"
-    )
-
-
-    write.csv(
-
-      data.frame(
-
-        gene =
-          setdiff(
-            dsb_gene_universe,
-            gse_gene_overlap
-          )
-
-      ),
-
-      file.path(
-        results_dir,
-        "Step14_GSE76427_unmatched_DSB_genes.csv"
-      ),
-
-      row.names = FALSE
-
-    )
-
-
-    if (
-      length(gse_gene_overlap) < 10
-    ) {
-
-      stop(
-        "\nERROR: Fewer than 10 DSB genes matched GSE76427.\n"
-      )
-
-    }
-
-
-    # ------------------------------------------------------------------
-    # Match samples
-    # ------------------------------------------------------------------
-
-    gse_common_samples <- intersect(
-
-      colnames(gse_expr),
-
-      names(gse_lipid)
-
-    )
-
-
-    if (
-      length(gse_common_samples) < 20
-    ) {
-
-      stop(
-
-        "\nERROR: Fewer than 20 GSE76427 samples matched lipid score.\n",
-
-        "Matched:",
-        length(gse_common_samples),
-        "\n"
-
-      )
-
-    }
-
-
-    gse_expr_final <- gse_expr[
-
-      gse_gene_overlap,
-
-      gse_common_samples,
-
-      drop = FALSE
-
-    ]
-
-
-    # CRITICAL:
-    # Explicit numeric conversion
-
-    gse_expr_final <- as.matrix(
-      gse_expr_final
-    )
-
-    mode(
-      gse_expr_final
-    ) <- "numeric"
-
-
-    gse_lipid_final <- as.numeric(
-
-      gse_lipid[
-        gse_common_samples
-      ]
-
-    )
-
-
-    cat(
-      "Final GSE76427 samples:",
-      length(gse_lipid_final),
-      "\n\n"
-    )
-
-
-    # ==================================================================
-    # 14.28 — GSE76427 SPEARMAN
-    # ==================================================================
-
-    cat(
-      "============================================================\n"
-    )
-
-    cat(
-      "14.28 — GSE76427 GENE-LEVEL SPEARMAN\n"
-    )
-
-    cat(
-      "============================================================\n\n"
-    )
-
-
-    gse_gene_results <- run_gene_spearman(
-
-      gse_expr_final,
-
-      gse_lipid_final
-
-    )
-
-
-    gse_gene_results <- gse_gene_results %>%
-
-      left_join(
-        gene_membership,
-        by = "gene"
-      ) %>%
-
-      arrange(
-        FDR,
-        desc(
-          abs(rho)
-        )
-      )
-
-
-    write.csv(
-
-      gse_gene_results,
-
-      file.path(
-        results_dir,
-        "Step14_GSE76427_DSB_gene_correlations.csv"
-      ),
-
-      row.names = FALSE
-
-    )
-
-
-    gse_significant <- gse_gene_results %>%
-
-      filter(
-        !is.na(FDR),
-        FDR < 0.05
-      )
-
-
-    gse_negative <- gse_significant %>%
-
-      filter(
-        rho < 0
-      ) %>%
-
-      arrange(
-        FDR,
-        desc(
-          abs(rho)
-        )
-      )
-
-
-    gse_positive <- gse_significant %>%
-
-      filter(
-        rho > 0
-      ) %>%
-
-      arrange(
-        FDR,
-        desc(
-          abs(rho)
-        )
-      )
-
-
-    write.csv(
-
-      gse_significant,
-
-      file.path(
-        results_dir,
-        "Step14_GSE76427_significant_DSB_genes.csv"
-      ),
-
-      row.names = FALSE
-
-    )
-
-
-    write.csv(
-
-      gse_negative,
-
-      file.path(
-        results_dir,
-        "Step14_GSE76427_significant_negative_DSB_genes.csv"
-      ),
-
-      row.names = FALSE
-
-    )
-
-
-    write.csv(
-
-      gse_positive,
-
-      file.path(
-        results_dir,
-        "Step14_GSE76427_significant_positive_DSB_genes.csv"
-      ),
-
-      row.names = FALSE
-
-    )
-
-
-    cat(
-      "GSE76427 genes tested:",
-      nrow(gse_gene_results),
-      "\n"
-    )
-
-    cat(
-      "GSE76427 significant:",
-      nrow(gse_significant),
-      "\n"
-    )
-
-    cat(
-      "GSE76427 negative:",
-      nrow(gse_negative),
-      "\n"
-    )
-
-    cat(
-      "GSE76427 positive:",
-      nrow(gse_positive),
-      "\n\n"
-    )
-
-
-    # ==================================================================
-    # 14.29 — CROSS-COHORT CONCORDANCE
-    # ==================================================================
-
-    cat(
-      "============================================================\n"
-    )
-
-    cat(
-      "14.29 — CROSS-COHORT CONCORDANCE\n"
-    )
-
-    cat(
-      "============================================================\n\n"
-    )
-
-
-    cross_cohort <- inner_join(
-
-      tcga_gene_results %>%
-
-        select(
-
-          gene,
-
-          TCGA_rho = rho,
-
-          TCGA_p = p_value,
-
-          TCGA_FDR = FDR
-
-        ),
-
-      gse_gene_results %>%
-
-        select(
-
-          gene,
-
-          GSE76427_rho = rho,
-
-          GSE76427_p = p_value,
-
-          GSE76427_FDR = FDR
-
-        ),
-
-      by = "gene"
-
-    ) %>%
-
-      left_join(
-
-        gene_membership,
-
-        by = "gene"
-
-      )
-
-
-    cross_cohort <- cross_cohort %>%
-
-      mutate(
-
-        direction_concordant =
-
-          ifelse(
-
-            sign(
-              TCGA_rho
-            ) ==
-
-              sign(
-                GSE76427_rho
-              ),
-
-            "Yes",
-
-            "No"
-
-          ),
-
-
-        significant_both =
-
-          ifelse(
-
-            TCGA_FDR < 0.05 &
-
-              GSE76427_FDR < 0.05,
-
-            "Yes",
-
-            "No"
-
-          ),
-
-
-        significant_negative_both =
-
-          ifelse(
-
-            TCGA_FDR < 0.05 &
-
-              GSE76427_FDR < 0.05 &
-
-              TCGA_rho < 0 &
-
-              GSE76427_rho < 0,
-
-            "Yes",
-
-            "No"
-
-          )
-
-      )
-
-
-    write.csv(
-
-      cross_cohort,
-
-      file.path(
-        results_dir,
-        "Step14_TCGA_GSE76427_DSB_cross_cohort_concordance.csv"
-      ),
-
-      row.names = FALSE
-
-    )
-
-
-    # ------------------------------------------------------------------
-    # Effect-size concordance
-    # ------------------------------------------------------------------
-
-    valid_cross <- cross_cohort %>%
-
-      filter(
-
-        is.finite(
-          TCGA_rho
-        ),
-
-        is.finite(
-          GSE76427_rho
-        )
-
-      )
-
-
-    if (
-      nrow(valid_cross) >= 3
-    ) {
-
-      concordance_test <- cor.test(
-
-        valid_cross$TCGA_rho,
-
-        valid_cross$GSE76427_rho,
-
-        method = "spearman",
-
-        exact = FALSE
-
-      )
-
-
-      concordance_summary <- data.frame(
-
-        genes_tested =
-          nrow(valid_cross),
-
-        spearman_rho =
-          unname(
-            concordance_test$estimate
-          ),
-
-        p_value =
-          concordance_test$p.value,
-
-        significant_both =
-          sum(
-            valid_cross$significant_both ==
-              "Yes",
-            na.rm = TRUE
-          ),
-
-        directionally_concordant =
-          sum(
-            valid_cross$direction_concordant ==
-              "Yes",
-            na.rm = TRUE
-          ),
-
-        significantly_negative_both =
-          sum(
-            valid_cross$significant_negative_both ==
-              "Yes",
-            na.rm = TRUE
-          )
-
-      )
-
-
-      write.csv(
-
-        concordance_summary,
-
-        file.path(
-          results_dir,
-          "Step14_cross_cohort_concordance_summary.csv"
-        ),
-
-        row.names = FALSE
-
-      )
-
-
-      print(
-        concordance_summary
-      )
-
-    }
-
-
-    # ==================================================================
-    # 14.30 — FINAL REPRODUCIBLE NEGATIVE GENES
-    # ==================================================================
-
-    cat(
-      "\n============================================================\n"
-    )
-
-    cat(
-      "14.30 — FINAL REPRODUCIBLE NEGATIVE GENES\n"
-    )
-
-    cat(
-      "============================================================\n\n"
-    )
-
-
-    reproducible_negative <- cross_cohort %>%
-
-      filter(
-
-        TCGA_FDR < 0.05,
-
-        GSE76427_FDR < 0.05,
-
-        TCGA_rho < 0,
-
-        GSE76427_rho < 0
-
-      ) %>%
-
-      mutate(
-
-        mean_rho = (
-
-          TCGA_rho +
-
-            GSE76427_rho
-
-        ) / 2,
-
-
-        minimum_absolute_rho = pmin(
-
-          abs(
-            TCGA_rho
-          ),
-
-          abs(
-            GSE76427_rho
-          )
-
-        )
-
-      ) %>%
-
-      arrange(
-
-        desc(
-          minimum_absolute_rho
-        )
-
-      )
-
-
-    write.csv(
-
-      reproducible_negative,
-
-      file.path(
-        results_dir,
-        "Step14_FINAL_reproducible_negative_DSB_genes.csv"
-      ),
-
-      row.names = FALSE
-
-    )
-
-
-    cat(
-      "Reproducible negative genes:",
-      nrow(reproducible_negative),
-      "\n\n"
-    )
-
-
-    if (
-      nrow(reproducible_negative) > 0
-    ) {
-
-      print(
-        reproducible_negative
-      )
-
-    }
-
-
-    # ==================================================================
-    # 14.31 — CROSS-COHORT PLOT
-    # ==================================================================
-
-    if (
-      nrow(valid_cross) >= 3
-    ) {
-
-      p_cross <- ggplot(
-
-        valid_cross,
-
-        aes(
-
-          x = TCGA_rho,
-
-          y = GSE76427_rho
-
-        )
-
-      ) +
-
-        geom_point(
-
-          size = 2.5,
-
-          alpha = 0.8
-
-        ) +
-
-        geom_smooth(
-
-          method = "lm",
-
-          se = TRUE
-
-        ) +
-
-        geom_vline(
-
-          xintercept = 0,
-
-          linetype = "dashed"
-
-        ) +
-
-        geom_hline(
-
-          yintercept = 0,
-
-          linetype = "dashed"
-
-        ) +
-
-        theme_classic(
-
-          base_size = 12
-
-        ) +
-
-        labs(
-
-          title =
-            "Cross-cohort concordance of DSB-associated genes",
-
-          x =
-            "TCGA Spearman ρ",
-
-          y =
-            "GSE76427 Spearman ρ"
-
-        )
-
-
-      ggsave(
-
-        file.path(
-          results_dir,
-          "Step14_TCGA_GSE76427_DSB_gene_concordance.pdf"
-        ),
-
-        p_cross,
-
-        width = 7,
-
-        height = 6
-
-      )
-
-    }
-
-
-    # ==================================================================
-    # 14.32 — FINAL SUMMARY
-    # ==================================================================
-
-    final_summary <- data.frame(
-
-      metric = c(
-
-        "Predefined DSB-associated gene universe",
-
-        "TCGA genes tested",
-
-        "TCGA significant genes",
-
-        "TCGA significant negative genes",
-
-        "TCGA significant positive genes",
-
-        "GSE76427 genes tested",
-
-        "GSE76427 significant genes",
-
-        "Genes significant in both cohorts",
-
-        "Directionally concordant genes",
-
-        "Significantly negative in both cohorts"
-
-      ),
-
-      value = c(
-
-        length(
-          dsb_gene_universe
-        ),
-
-        nrow(
-          tcga_gene_results
-        ),
-
-        sum(
-          tcga_gene_results$FDR < 0.05,
-          na.rm = TRUE
-        ),
-
-        sum(
-
-          tcga_gene_results$FDR < 0.05 &
-
-            tcga_gene_results$rho < 0,
-
-          na.rm = TRUE
-
-        ),
-
-        sum(
-
-          tcga_gene_results$FDR < 0.05 &
-
-            tcga_gene_results$rho > 0,
-
-          na.rm = TRUE
-
-        ),
-
-        nrow(
-          gse_gene_results
-        ),
-
-        sum(
-          gse_gene_results$FDR < 0.05,
-          na.rm = TRUE
-        ),
-
-        sum(
-
-          cross_cohort$significant_both ==
-            "Yes",
-
-          na.rm = TRUE
-
-        ),
-
-        sum(
-
-          cross_cohort$direction_concordant ==
-            "Yes",
-
-          na.rm = TRUE
-
-        ),
-
-        sum(
-
-          cross_cohort$significant_negative_both ==
-            "Yes",
-
-          na.rm = TRUE
-
-        )
-
-      )
-
-    )
-
-
-    write.csv(
-
-      final_summary,
-
-      file.path(
-        results_dir,
-        "Step14_FINAL_summary.csv"
-      ),
-
-      row.names = FALSE
-
-    )
-
-
-    # ==================================================================
-    # 14.33 — DISPLAY FINAL RESULTS
-    # ==================================================================
-
-    cat(
-      "\n============================================================\n"
-    )
-
-    cat(
-      "STEP 14 COMPLETE\n"
-    )
-
-    cat(
-      "============================================================\n\n"
-    )
-
-
-    print(
-      final_summary
-    )
-
-
-    cat(
-      "\nResults saved to:\n"
-    )
-
-    cat(
-      normalizePath(
-        results_dir,
-        winslash = "/"
-      ),
-      "\n\n"
-    )
-
-
-    cat(
-      "Most important final file:\n"
-    )
-
-    cat(
-      "Step14_FINAL_reproducible_negative_DSB_genes.csv\n\n"
-    )
-
-
-  }
 
 }
 
 
 # ======================================================================
-# END OF STEP 14
+# 14.26.4 — SAMPLE MATCHING
 # ======================================================================
 
+expression_samples <- colnames(
+    gse14_expression
+)
 
 
+lipid_samples <- names(
+    gse14_lipid_score
+)
 
 
+common_samples <- intersect(
+    expression_samples,
+    lipid_samples
+)
 
 
+cat(
+    "Expression samples: ",
+    length(expression_samples),
+    "\n",
+    sep = ""
+)
+
+cat(
+    "Lipid-score samples: ",
+    length(lipid_samples),
+    "\n",
+    sep = ""
+)
+
+cat(
+    "Common samples: ",
+    length(common_samples),
+    "\n\n",
+    sep = ""
+)
 
 
+if (
+    length(common_samples) < 20
+) {
+
+    stop(
+        paste0(
+            "\nERROR: Only ",
+            length(common_samples),
+            " samples matched between expression and lipid score.\n"
+        )
+    )
+
+}
 
 
+# ----------------------------------------------------------------------
+# Restrict expression and lipid score to the same samples
+# ----------------------------------------------------------------------
+
+gse14_expression <- gse14_expression[
+    ,
+    common_samples,
+    drop = FALSE
+]
 
 
+gse14_lipid_score <- gse14_lipid_score[
+    match(
+        common_samples,
+        names(gse14_lipid_score)
+    )
+]
 
 
+names(
+    gse14_lipid_score
+) <- common_samples
 
 
+# ----------------------------------------------------------------------
+# Final sample-order check
+# ----------------------------------------------------------------------
+
+if (
+    !identical(
+        colnames(gse14_expression),
+        names(gse14_lipid_score)
+    )
+) {
+
+    stop(
+        "\nERROR: Final GSE76427 sample-order QC failed.\n"
+    )
+
+}
+
+
+cat(
+    "Final matched GSE76427 samples: ",
+    ncol(gse14_expression),
+    "\n\n",
+    sep = ""
+)
+
+
+# ======================================================================
+# 14.27 — LOAD THE EXACT TCGA STEP 11 GENE LIST
+# ======================================================================
+
+cat(
+    "============================================================\n"
+)
+
+cat(
+    "14.27 — LOAD TCGA STEP 11 EXPANDED GENE LIST\n"
+)
+
+cat(
+    "============================================================\n\n"
+)
+
+
+# ----------------------------------------------------------------------
+# First use existing object if available
+# ----------------------------------------------------------------------
+
+if (
+    exists("tcga_step11_results")
+) {
+
+    cat(
+        "Using existing object: tcga_step11_results\n\n"
+    )
+
+} else {
+
+    step11_file <- file.path(
+        "results",
+        "Step11_2.5_expanded_HR_gene_lipid_correlation_results.csv"
+    )
+
+
+    if (
+        !file.exists(step11_file)
+    ) {
+
+        stop(
+            paste0(
+                "\nERROR: TCGA Step 11 results file not found:\n",
+                step11_file,
+                "\n\n",
+                "Expected file:\n",
+                "results/Step11_2.5_expanded_HR_gene_lipid_correlation_results.csv\n"
+            )
+        )
+
+    }
+
+
+    tcga_step11_results <- read.csv(
+        step11_file,
+        stringsAsFactors = FALSE,
+        check.names = FALSE
+    )
+
+
+    cat(
+        "Loaded TCGA Step 11 results from:\n",
+        step11_file,
+        "\n\n"
+    )
+
+}
+
+
+# ======================================================================
+# 14.27.1 — IDENTIFY GENE COLUMN
+# ======================================================================
+
+gene_candidates <- names(
+    tcga_step11_results
+)[
+    grepl(
+        "^gene$|gene",
+        names(tcga_step11_results),
+        ignore.case = TRUE
+    )
+]
+
+
+if (
+    length(gene_candidates) == 0
+) {
+
+    stop(
+        "\nERROR: Could not identify gene column in TCGA Step 11 results.\n"
+    )
+
+}
+
+
+gene_column <- gene_candidates[1]
+
+
+cat(
+    "Gene column:",
+    gene_column,
+    "\n\n"
+)
+
+
+# ======================================================================
+# 14.27.2 — EXTRACT EXACT GENE LIST
+# ======================================================================
+
+expanded_dsb_genes <- unique(
+
+    toupper(
+        trimws(
+            as.character(
+                tcga_step11_results[
+                    ,
+                    gene_column
+                ]
+            )
+        )
+    )
+
+)
+
+
+expanded_dsb_genes <- expanded_dsb_genes[
+    !is.na(expanded_dsb_genes) &
+    expanded_dsb_genes != ""
+]
+
+
+cat(
+    "Genes in TCGA Step 11 list: ",
+    length(expanded_dsb_genes),
+    "\n\n",
+    sep = ""
+)
+
+
+# ======================================================================
+# 14.28 — STANDARDIZE GSE GENE IDENTIFIERS
+# ======================================================================
+
+rownames(
+    gse14_expression
+) <- toupper(
+    trimws(
+        rownames(
+            gse14_expression
+        )
+    )
+)
+
+
+valid_gene_rows <- !is.na(
+    rownames(gse14_expression)
+) &
+    rownames(gse14_expression) != ""
+
+
+gse14_expression <- gse14_expression[
+    valid_gene_rows,
+    ,
+    drop = FALSE
+]
+
+
+# ======================================================================
+# 14.29 — COLLAPSE DUPLICATE GENE SYMBOLS
+# ======================================================================
+
+if (
+    anyDuplicated(
+        rownames(gse14_expression)
+    ) > 0
+) {
+
+    cat(
+        "Duplicate gene symbols detected in GSE76427.\n"
+    )
+
+    cat(
+        "Collapsing duplicate rows using the median expression.\n\n"
+    )
+
+
+    unique_genes <- unique(
+        rownames(gse14_expression)
+    )
+
+
+    collapsed_matrix <- matrix(
+        NA_real_,
+        nrow = length(unique_genes),
+        ncol = ncol(gse14_expression),
+        dimnames = list(
+            unique_genes,
+            colnames(gse14_expression)
+        )
+    )
+
+
+    for (
+        i in seq_along(unique_genes)
+    ) {
+
+        gene_i <- unique_genes[i]
+
+
+        rows_i <- which(
+            rownames(gse14_expression) == gene_i
+        )
+
+
+        if (
+            length(rows_i) == 1
+        ) {
+
+            collapsed_matrix[i, ] <-
+                gse14_expression[
+                    rows_i,
+                    ]
+
+        } else {
+
+            collapsed_matrix[i, ] <-
+                apply(
+                    gse14_expression[
+                        rows_i,
+                        ,
+                        drop = FALSE
+                    ],
+                    2,
+                    median,
+                    na.rm = TRUE
+                )
+
+        }
+
+    }
+
+
+    gse14_expression <- collapsed_matrix
+
+}
+
+
+# ======================================================================
+# 14.30 — MATCH THE SAME GENES USED IN TCGA
+# ======================================================================
+
+gse_genes_present <- intersect(
+    expanded_dsb_genes,
+    rownames(gse14_expression)
+)
+
+
+gse_genes_missing <- setdiff(
+    expanded_dsb_genes,
+    rownames(gse14_expression)
+)
+
+
+cat(
+    "============================================================\n"
+)
+
+cat(
+    "GSE76427 GENE COVERAGE\n"
+)
+
+cat(
+    "============================================================\n\n"
+)
+
+cat(
+    "TCGA Step 11 gene universe: ",
+    length(expanded_dsb_genes),
+    "\n",
+    sep = ""
+)
+
+cat(
+    "Genes matched in GSE76427: ",
+    length(gse_genes_present),
+    "\n",
+    sep = ""
+)
+
+cat(
+    "Genes not matched: ",
+    length(gse_genes_missing),
+    "\n",
+    sep = ""
+)
+
+cat(
+    "Coverage: ",
+    round(
+        100 *
+        length(gse_genes_present) /
+        length(expanded_dsb_genes),
+        1
+    ),
+    "%\n\n",
+    sep = ""
+)
+
+
+# ----------------------------------------------------------------------
+# Save coverage information
+# ----------------------------------------------------------------------
+
+write.csv(
+
+    data.frame(
+        gene = gse_genes_missing
+    ),
+
+    file.path(
+        "results",
+        "Step14_GSE76427_missing_Step11_genes.csv"
+    ),
+
+    row.names = FALSE
+
+)
+
+
+if (
+    length(gse_genes_present) < 10
+) {
+
+    stop(
+        paste0(
+            "\nERROR: Only ",
+            length(gse_genes_present),
+            " of ",
+            length(expanded_dsb_genes),
+            " Step 11 genes are present in gse12_expression.\n\n",
+            "This means the issue is upstream in Step 12 gene annotation, ",
+            "not in the Step 14 correlation code.\n"
+        )
+    )
+
+}
+
+
+# ======================================================================
+# 14.31 — CREATE FINAL GSE GENE MATRIX
+# ======================================================================
+
+gse14_gene_expression <- gse14_expression[
+    gse_genes_present,
+    ,
+    drop = FALSE
+]
+
+
+# ======================================================================
+# 14.32 — SPEARMAN CORRELATION FOR EVERY GENE
+# ======================================================================
+
+cat(
+    "\n============================================================\n"
+)
+
+cat(
+    "14.32 — GSE76427 SPEARMAN CORRELATIONS\n"
+)
+
+cat(
+    "============================================================\n\n"
+)
+
+
+gse14_results <- data.frame(
+
+    Gene = gse_genes_present,
+
+    N = NA_integer_,
+
+    Spearman_rho = NA_real_,
+
+    P_value = NA_real_,
+
+    stringsAsFactors = FALSE
+
+)
+
+
+for (
+    i in seq_along(gse_genes_present)
+) {
+
+    gene_i <- gse_genes_present[i]
+
+
+    expression_i <- as.numeric(
+        gse14_gene_expression[
+            gene_i,
+            ]
+    )
+
+
+    valid <- is.finite(
+        expression_i
+    ) &
+        is.finite(
+            gse14_lipid_score
+        )
+
+
+    n_valid <- sum(
+        valid
+    )
+
+
+    gse14_results$N[i] <- n_valid
+
+
+    if (
+        n_valid < 10
+    ) {
+
+        next
+
+    }
+
+
+    if (
+        length(
+            unique(
+                expression_i[valid]
+            )
+        ) < 2
+    ) {
+
+        next
+
+    }
+
+
+    correlation_test <- suppressWarnings(
+
+        cor.test(
+
+            gse14_lipid_score[valid],
+
+            expression_i[valid],
+
+            method = "spearman",
+
+            exact = FALSE
+
+        )
+
+    )
+
+
+    gse14_results$Spearman_rho[i] <-
+        as.numeric(
+            correlation_test$estimate
+        )
+
+
+    gse14_results$P_value[i] <-
+        correlation_test$p.value
+
+}
+
+
+# ======================================================================
+# 14.33 — BH-FDR
+# ======================================================================
+
+gse14_results$BH_FDR <- p.adjust(
+    gse14_results$P_value,
+    method = "BH"
+)
+
+
+# ======================================================================
+# 14.34 — DIRECTION AND SIGNIFICANCE
+# ======================================================================
+
+gse14_results$Direction <- ifelse(
+
+    is.na(
+        gse14_results$Spearman_rho
+    ),
+
+    "Not tested",
+
+    ifelse(
+
+        gse14_results$Spearman_rho < 0,
+
+        "Negative",
+
+        ifelse(
+
+            gse14_results$Spearman_rho > 0,
+
+            "Positive",
+
+            "Zero"
+
+        )
+
+    )
+
+)
+
+
+gse14_results$Significant <- (
+
+    !is.na(
+        gse14_results$BH_FDR
+    ) &
+
+    gse14_results$BH_FDR < 0.05
+
+)
+
+
+gse14_results <- gse14_results[
+    order(
+        gse14_results$BH_FDR,
+        -abs(
+            gse14_results$Spearman_rho
+        )
+    ),
+    ,
+    drop = FALSE
+]
+
+
+# ======================================================================
+# 14.35 — SAVE COMPLETE GSE RESULTS
+# ======================================================================
+
+write.csv(
+
+    gse14_results,
+
+    file.path(
+        "results",
+        "Step14_GSE76427_DSB_gene_lipid_correlations.csv"
+    ),
+
+    row.names = FALSE
+
+)
+
+
+# ======================================================================
+# 14.36 — SIGNIFICANT POSITIVE / NEGATIVE GENES
+# ======================================================================
+
+gse14_negative <- gse14_results[
+    !is.na(
+        gse14_results$BH_FDR
+    ) &
+    gse14_results$BH_FDR < 0.05 &
+    gse14_results$Spearman_rho < 0,
+    ,
+    drop = FALSE
+]
+
+
+gse14_positive <- gse14_results[
+    !is.na(
+        gse14_results$BH_FDR
+    ) &
+    gse14_results$BH_FDR < 0.05 &
+    gse14_results$Spearman_rho > 0,
+    ,
+    drop = FALSE
+]
+
+
+write.csv(
+
+    gse14_negative,
+
+    file.path(
+        "results",
+        "Step14_GSE76427_significant_negative_DSB_genes.csv"
+    ),
+
+    row.names = FALSE
+
+)
+
+
+write.csv(
+
+    gse14_positive,
+
+    file.path(
+        "results",
+        "Step14_GSE76427_significant_positive_DSB_genes.csv"
+    ),
+
+    row.names = FALSE
+
+)
+
+
+# ======================================================================
+# 14.37 — PRINT GSE RESULTS
+# ======================================================================
+
+cat(
+    "\n============================================================\n"
+)
+
+cat(
+    "GSE76427 GENE-LEVEL RESULTS\n"
+)
+
+cat(
+    "============================================================\n\n"
+)
+
+
+cat(
+    "Genes tested: ",
+    nrow(gse14_results),
+    "\n",
+    sep = ""
+)
+
+cat(
+    "Significant genes: ",
+    sum(
+        gse14_results$Significant,
+        na.rm = TRUE
+    ),
+    "\n",
+    sep = ""
+)
+
+cat(
+    "Significant negative genes: ",
+    nrow(gse14_negative),
+    "\n",
+    sep = ""
+)
+
+cat(
+    "Significant positive genes: ",
+    nrow(gse14_positive),
+    "\n\n",
+    sep = ""
+)
+
+
+cat(
+    "Top GSE76427 negative associations:\n\n"
+)
+
+
+if (
+    nrow(gse14_negative) > 0
+) {
+
+    print(
+        head(
+            gse14_negative,
+            20
+        )
+    )
+
+} else {
+
+    cat(
+        "None at BH-FDR < 0.05.\n"
+    )
+
+}
+
+
+# ======================================================================
+# 14.38 — LOAD TCGA RHO VALUES FOR CROSS-COHORT VALIDATION
+# ======================================================================
+
+tcga_gene_results <- tcga_step11_results
+
+
+# ----------------------------------------------------------------------
+# Identify TCGA rho column
+# ----------------------------------------------------------------------
+
+rho_candidates <- names(
+    tcga_gene_results
+)[
+    grepl(
+        "rho|spearman|correlation",
+        names(tcga_gene_results),
+        ignore.case = TRUE
+    )
+]
+
+
+rho_candidates <- rho_candidates[
+    !grepl(
+        "p|fdr|adjust",
+        rho_candidates,
+        ignore.case = TRUE
+    )
+]
+
+
+if (
+    length(rho_candidates) == 0
+) {
+
+    stop(
+        "\nERROR: Could not identify TCGA rho column.\n"
+    )
+
+}
+
+
+tcga_rho_column <- rho_candidates[1]
+
+
+# ----------------------------------------------------------------------
+# Create clean TCGA table
+# ----------------------------------------------------------------------
+
+tcga_clean <- data.frame(
+
+    Gene = toupper(
+        trimws(
+            as.character(
+                tcga_gene_results[
+                    ,
+                    gene_column
+                ]
+            )
+        )
+    ),
+
+    TCGA_rho = suppressWarnings(
+        as.numeric(
+            tcga_gene_results[
+                ,
+                tcga_rho_column
+            ]
+        )
+    ),
+
+    stringsAsFactors = FALSE
+
+)
+
+
+tcga_clean <- tcga_clean[
+    tcga_clean$Gene %in%
+        expanded_dsb_genes,
+    ,
+    drop = FALSE
+]
+
+
+tcga_clean <- tcga_clean[
+    !duplicated(
+        tcga_clean$Gene
+    ),
+    ,
+    drop = FALSE
+]
+
+
+# ======================================================================
+# 14.39 — CROSS-COHORT MERGE
+# ======================================================================
+
+cross_cohort <- merge(
+
+    tcga_clean,
+
+    gse14_results[
+        ,
+        c(
+            "Gene",
+            "N",
+            "Spearman_rho",
+            "P_value",
+            "BH_FDR",
+            "Direction",
+            "Significant"
+        )
+    ],
+
+    by = "Gene",
+
+    all = TRUE
+
+)
+
+
+names(
+    cross_cohort
+)[
+    names(cross_cohort) ==
+        "Spearman_rho"
+] <- "GSE76427_rho"
+
+
+names(
+    cross_cohort
+)[
+    names(cross_cohort) ==
+        "BH_FDR"
+] <- "GSE76427_FDR"
+
+
+# ======================================================================
+# 14.40 — DIRECTIONAL CONCORDANCE
+# ======================================================================
+
+cross_cohort$Direction_concordant <- (
+
+    is.finite(
+        cross_cohort$TCGA_rho
+    ) &
+
+    is.finite(
+        cross_cohort$GSE76427_rho
+    ) &
+
+    sign(
+        cross_cohort$TCGA_rho
+    ) ==
+
+    sign(
+        cross_cohort$GSE76427_rho
+    )
+
+)
+
+
+cross_cohort$Negative_in_both <- (
+
+    cross_cohort$TCGA_rho < 0 &
+
+    cross_cohort$GSE76427_rho < 0
+
+)
+
+
+cross_cohort$Significant_in_both <- (
+
+    cross_cohort$TCGA_rho != 0 &
+
+    cross_cohort$GSE76427_rho != 0
+
+)
+
+
+# ======================================================================
+# 14.41 — SAVE CROSS-COHORT RESULTS
+# ======================================================================
+
+write.csv(
+
+    cross_cohort,
+
+    file.path(
+        "results",
+        "Step14_TCGA_GSE76427_DSB_gene_concordance.csv"
+    ),
+
+    row.names = FALSE
+
+)
+
+
+# ======================================================================
+# 14.42 — CROSS-COHORT CORRELATION OF EFFECT SIZES
+# ======================================================================
+
+valid_cross <- cross_cohort[
+    is.finite(
+        cross_cohort$TCGA_rho
+    ) &
+    is.finite(
+        cross_cohort$GSE76427_rho
+    ),
+    ,
+    drop = FALSE
+]
+
+
+if (
+    nrow(valid_cross) >= 3
+) {
+
+    cross_test <- suppressWarnings(
+
+        cor.test(
+
+            valid_cross$TCGA_rho,
+
+            valid_cross$GSE76427_rho,
+
+            method = "spearman",
+
+            exact = FALSE
+
+        )
+
+    )
+
+
+    cross_rho <- as.numeric(
+        cross_test$estimate
+    )
+
+
+    cross_p <- cross_test$p.value
+
+
+} else {
+
+    cross_rho <- NA_real_
+
+    cross_p <- NA_real_
+
+}
+
+
+# ======================================================================
+# 14.43 — STRICT REPLICATION
+# ======================================================================
+
+# Because TCGA Step 11 already contains the TCGA significance results,
+# identify the TCGA FDR column if available.
+
+fdr_candidates <- names(
+    tcga_gene_results
+)[
+    grepl(
+        "FDR|BH|adjust",
+        names(tcga_gene_results),
+        ignore.case = TRUE
+    )
+]
+
+
+if (
+    length(fdr_candidates) > 0
+) {
+
+    tcga_fdr_column <- fdr_candidates[1]
+
+
+    tcga_clean$TCGA_FDR <- suppressWarnings(
+
+        as.numeric(
+            tcga_gene_results[
+                ,
+                tcga_fdr_column
+            ]
+        )
+
+    )
+
+} else {
+
+    tcga_clean$TCGA_FDR <- NA_real_
+
+}
+
+
+# Rebuild cross-cohort table with TCGA FDR
+
+cross_cohort <- merge(
+
+    tcga_clean,
+
+    gse14_results[
+        ,
+        c(
+            "Gene",
+            "N",
+            "Spearman_rho",
+            "P_value",
+            "BH_FDR",
+            "Direction",
+            "Significant"
+        )
+    ],
+
+    by = "Gene",
+
+    all = TRUE
+
+)
+
+
+names(
+    cross_cohort
+)[
+    names(cross_cohort) ==
+        "Spearman_rho"
+] <- "GSE76427_rho"
+
+
+names(
+    cross_cohort
+)[
+    names(cross_cohort) ==
+        "BH_FDR"
+] <- "GSE76427_FDR"
+
+
+cross_cohort$Direction_concordant <- (
+
+    is.finite(
+        cross_cohort$TCGA_rho
+    ) &
+
+    is.finite(
+        cross_cohort$GSE76427_rho
+    ) &
+
+    sign(
+        cross_cohort$TCGA_rho
+    ) ==
+    sign(
+        cross_cohort$GSE76427_rho
+    )
+
+)
+
+
+cross_cohort$Strict_replication <- (
+
+    !is.na(
+        cross_cohort$TCGA_FDR
+    ) &
+
+    cross_cohort$TCGA_FDR < 0.05 &
+
+    !is.na(
+        cross_cohort$GSE76427_FDR
+    ) &
+
+    cross_cohort$GSE76427_FDR < 0.05 &
+
+    cross_cohort$Direction_concordant
+
+)
+
+
+cross_cohort$Negative_in_both <- (
+
+    cross_cohort$TCGA_rho < 0 &
+
+    cross_cohort$GSE76427_rho < 0
+
+)
+
+
+write.csv(
+
+    cross_cohort,
+
+    file.path(
+        "results",
+        "Step14_TCGA_GSE76427_DSB_gene_concordance.csv"
+    ),
+
+    row.names = FALSE
+
+)
+
+
+# ======================================================================
+# 14.44 — STRICTLY REPLICATED GENES
+# ======================================================================
+
+strict_replicates <- cross_cohort[
+    cross_cohort$Strict_replication,
+    ,
+    drop = FALSE
+]
+
+
+strict_replicates <- strict_replicates[
+    order(
+        strict_replicates$GSE76427_FDR
+    ),
+    ,
+    drop = FALSE
+]
+
+
+write.csv(
+
+    strict_replicates,
+
+    file.path(
+        "results",
+        "Step14_GSE76427_strictly_replicated_DSB_genes.csv"
+    ),
+
+    row.names = FALSE
+
+)
+
+
+# ======================================================================
+# 14.45 — CROSS-COHORT SUMMARY
+# ======================================================================
+
+summary_table <- data.frame(
+
+    Metric = c(
+
+        "TCGA Step 11 gene universe",
+
+        "GSE76427 genes matched",
+
+        "GSE76427 genes tested",
+
+        "GSE76427 significant genes",
+
+        "GSE76427 significant negative genes",
+
+        "GSE76427 significant positive genes",
+
+        "Genes with concordant direction",
+
+        "Genes significant in both cohorts",
+
+        "Strictly replicated genes",
+
+        "Cross-cohort Spearman rho",
+
+        "Cross-cohort P value"
+
+    ),
+
+    Value = c(
+
+        length(
+            expanded_dsb_genes
+        ),
+
+        length(
+            gse_genes_present
+        ),
+
+        nrow(
+            gse14_results
+        ),
+
+        sum(
+            gse14_results$Significant,
+            na.rm = TRUE
+        ),
+
+        nrow(
+            gse14_negative
+        ),
+
+        nrow(
+            gse14_positive
+        ),
+
+        sum(
+            cross_cohort$Direction_concordant,
+            na.rm = TRUE
+        ),
+
+        sum(
+
+            !is.na(
+                cross_cohort$TCGA_FDR
+            ) &
+
+            cross_cohort$TCGA_FDR < 0.05 &
+
+            !is.na(
+                cross_cohort$GSE76427_FDR
+            ) &
+
+            cross_cohort$GSE76427_FDR < 0.05,
+
+            na.rm = TRUE
+
+        ),
+
+        nrow(
+            strict_replicates
+        ),
+
+        cross_rho,
+
+        cross_p
+
+    ),
+
+    stringsAsFactors = FALSE
+
+)
+
+
+write.csv(
+
+    summary_table,
+
+    file.path(
+        "results",
+        "Step14_GSE76427_DSB_gene_validation_summary.csv"
+    ),
+
+    row.names = FALSE
+
+)
+
+
+# ======================================================================
+# 14.46 — FINAL PRINT
+# ======================================================================
+
+cat(
+    "\n============================================================\n"
+)
+
+cat(
+    "STEP 14 GSE76427 ANALYSIS COMPLETE\n"
+)
+
+cat(
+    "============================================================\n\n"
+)
+
+
+print(
+    summary_table
+)
+
+
+cat(
+    "\nStrictly replicated genes:\n\n"
+)
+
+
+if (
+    nrow(strict_replicates) > 0
+) {
+
+    print(
+        strict_replicates[
+            ,
+            c(
+                "Gene",
+                "TCGA_rho",
+                "TCGA_FDR",
+                "GSE76427_rho",
+                "GSE76427_FDR"
+            ),
+            drop = FALSE
+        ],
+        row.names = FALSE
+    )
+
+} else {
+
+    cat(
+        "No genes met strict replication criteria.\n"
+    )
+
+}
+
+
+cat(
+    "\n============================================================\n"
+)
+
+cat(
+    "IMPORTANT OUTPUT FILES\n"
+)
+
+cat(
+    "============================================================\n\n"
+)
+
+cat(
+    "Step14_GSE76427_DSB_gene_lipid_correlations.csv\n"
+)
+
+cat(
+    "Step14_GSE76427_significant_negative_DSB_genes.csv\n"
+)
+
+cat(
+    "Step14_GSE76427_significant_positive_DSB_genes.csv\n"
+)
+
+cat(
+    "Step14_TCGA_GSE76427_DSB_gene_concordance.csv\n"
+)
+
+cat(
+    "Step14_GSE76427_strictly_replicated_DSB_genes.csv\n"
+)
+
+cat(
+    "Step14_GSE76427_DSB_gene_validation_summary.csv\n"
+)
+
+cat(
+    "\n============================================================\n"
+)
 
