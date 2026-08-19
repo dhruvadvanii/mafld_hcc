@@ -1,0 +1,1452 @@
+# ============================================================
+# STEP 14A — GSE14520 INPUT AUDIT
+# FINAL FILE-SPECIFIC VERSION
+# ============================================================
+#
+# GSE14520 = THIRD INDEPENDENT VALIDATION COHORT
+#
+# IMPORTANT:
+#   - GPL571 and GPL3921 are audited separately
+#   - No platform merging
+#   - No new genes
+#   - No biological correlations
+#   - No re-normalization
+#   - 18-gene validation universe remains frozen
+#   - No [[ ]] indexing is used
+#
+# ============================================================
+
+
+# ------------------------------------------------------------
+# 14A.0 — PROJECT PATHS
+# ------------------------------------------------------------
+
+options(stringsAsFactors = FALSE)
+
+project_dir <- "C:/Users/Dhruv Advani/OneDrive/Desktop/AIIMS/Research/MAFLD_HCC_Pipeline"
+
+gse14520_dir <- file.path(
+    project_dir,
+    "data",
+    "raw",
+    "GSE14520"
+)
+
+results_dir <- file.path(
+    project_dir,
+    "results"
+)
+
+if (!dir.exists(gse14520_dir)) {
+    stop(
+        paste0(
+            "\nERROR: GSE14520 directory not found:\n",
+            gse14520_dir,
+            "\n"
+        )
+    )
+}
+
+if (!dir.exists(results_dir)) {
+    dir.create(
+        results_dir,
+        recursive = TRUE
+    )
+}
+
+
+# ------------------------------------------------------------
+# 14A.1 — EXACT FILES
+# ------------------------------------------------------------
+
+gpl571_matrix <- file.path(
+    gse14520_dir,
+    "GSE14520-GPL571_series_matrix.txt"
+)
+
+gpl3921_matrix <- file.path(
+    gse14520_dir,
+    "GSE14520-GPL3921_series_matrix.txt"
+)
+
+gpl571_annotation <- file.path(
+    gse14520_dir,
+    "GPL571-17391.txt"
+)
+
+gpl3921_annotation <- file.path(
+    gse14520_dir,
+    "GPL3921-25447.txt"
+)
+
+
+required_files <- c(
+    gpl571_matrix,
+    gpl3921_matrix,
+    gpl571_annotation,
+    gpl3921_annotation
+)
+
+if (any(!file.exists(required_files))) {
+
+    missing_files <- required_files[
+        !file.exists(required_files)
+    ]
+
+    stop(
+        paste0(
+            "\nERROR: The following required files are missing:\n\n",
+            paste(
+                missing_files,
+                collapse = "\n"
+            ),
+            "\n"
+        )
+    )
+}
+
+
+cat("\n============================================================\n")
+cat("STEP 14A — GSE14520 INPUT AUDIT\n")
+cat("============================================================\n\n")
+
+cat(
+    "All four required files found.\n\n"
+)
+
+
+# ------------------------------------------------------------
+# 14A.2 — READ GEO SERIES MATRIX
+# ------------------------------------------------------------
+#
+# IMPORTANT:
+# These files use:
+#
+#   !series_matrix_table_begin
+#
+# followed by:
+#
+#   "ID_REF"  "GSM..."
+#
+# Therefore we specifically use this marker.
+#
+# ------------------------------------------------------------
+
+read_gse14520_matrix <- function(
+    file_path
+) {
+
+    cat(
+        "\nReading:",
+        basename(file_path),
+        "\n"
+    )
+
+
+    con <- file(
+        file_path,
+        open = "rt"
+    )
+
+    lines <- readLines(
+        con,
+        warn = FALSE
+    )
+
+    close(con)
+
+
+    # --------------------------------------------------------
+    # Locate expression table
+    # --------------------------------------------------------
+
+    table_begin <- grep(
+        "^!series_matrix_table_begin",
+        lines,
+        ignore.case = TRUE
+    )
+
+    table_end <- grep(
+        "^!series_matrix_table_end",
+        lines,
+        ignore.case = TRUE
+    )
+
+
+    if (length(table_begin) == 0) {
+
+        stop(
+            paste0(
+                "\nERROR: !series_matrix_table_begin not found in:\n",
+                basename(file_path),
+                "\n"
+            )
+        )
+    }
+
+
+    header_line <- table_begin[1] + 1
+
+
+    if (length(table_end) > 0) {
+
+        end_line <- table_end[1] - 1
+
+    } else {
+
+        end_line <- length(lines)
+    }
+
+
+    # --------------------------------------------------------
+    # Extract expression table
+    # --------------------------------------------------------
+
+    expression_lines <- lines[
+        header_line:end_line
+    ]
+
+    expression_lines <- expression_lines[
+        !grepl(
+            "^!",
+            expression_lines
+        )
+    ]
+
+    expression_lines <- expression_lines[
+        nzchar(
+            trimws(
+                expression_lines
+            )
+        )
+    ]
+
+
+    # --------------------------------------------------------
+    # Read expression table
+    # --------------------------------------------------------
+
+    expression_df <- read.delim(
+        text = expression_lines,
+        header = TRUE,
+        sep = "\t",
+        quote = "\"",
+        comment.char = "",
+        check.names = FALSE,
+        stringsAsFactors = FALSE,
+        fill = TRUE
+    )
+
+
+    if (ncol(expression_df) < 2) {
+
+        stop(
+            paste0(
+                "\nERROR: Expression matrix has fewer than 2 columns in:\n",
+                basename(file_path),
+                "\n"
+            )
+        )
+    }
+
+
+    # --------------------------------------------------------
+    # First column = probe ID
+    # --------------------------------------------------------
+
+    probe_ids <- as.character(
+        expression_df[, 1]
+    )
+
+
+    # --------------------------------------------------------
+    # Remaining columns = samples
+    # --------------------------------------------------------
+
+    expression_values <- expression_df[
+        ,
+        -1,
+        drop = FALSE
+    ]
+
+
+    expression_matrix <- as.matrix(
+        expression_values
+    )
+
+    suppressWarnings(
+        storage.mode(
+            expression_matrix
+        ) <- "numeric"
+    )
+
+
+    rownames(
+        expression_matrix
+    ) <- probe_ids
+
+
+    # --------------------------------------------------------
+    # Remove invalid probe rows
+    # --------------------------------------------------------
+
+    keep_rows <- !is.na(
+        rownames(
+            expression_matrix
+        )
+    ) &
+    nzchar(
+        trimws(
+            rownames(
+                expression_matrix
+            )
+        )
+    )
+
+
+    expression_matrix <- expression_matrix[
+        keep_rows,
+        ,
+        drop = FALSE
+    ]
+
+
+    return(
+        expression_matrix
+    )
+}
+
+
+# ------------------------------------------------------------
+# 14A.3 — READ BOTH PLATFORMS
+# ------------------------------------------------------------
+
+gse14520_gpl571_expression <- read_gse14520_matrix(
+    gpl571_matrix
+)
+
+gse14520_gpl3921_expression <- read_gse14520_matrix(
+    gpl3921_matrix
+)
+
+
+# ------------------------------------------------------------
+# 14A.4 — BASIC DIMENSIONS
+# ------------------------------------------------------------
+
+cat("\n============================================================\n")
+cat("EXPRESSION MATRIX DIMENSIONS\n")
+cat("============================================================\n\n")
+
+cat(
+    "GPL571:",
+    nrow(gse14520_gpl571_expression),
+    "probes x",
+    ncol(gse14520_gpl571_expression),
+    "samples\n"
+)
+
+cat(
+    "GPL3921:",
+    nrow(gse14520_gpl3921_expression),
+    "probes x",
+    ncol(gse14520_gpl3921_expression),
+    "samples\n\n"
+)
+
+
+# ------------------------------------------------------------
+# 14A.5 — SAMPLE IDS
+# ------------------------------------------------------------
+
+gse14520_gpl571_sample_ids <- colnames(
+    gse14520_gpl571_expression
+)
+
+gse14520_gpl3921_sample_ids <- colnames(
+    gse14520_gpl3921_expression
+)
+
+
+cat("First 10 GPL571 sample IDs:\n")
+
+print(
+    head(
+        gse14520_gpl571_sample_ids,
+        10
+    )
+)
+
+cat("\nFirst 10 GPL3921 sample IDs:\n")
+
+print(
+    head(
+        gse14520_gpl3921_sample_ids,
+        10
+    )
+)
+
+
+# ------------------------------------------------------------
+# 14A.6 — FUNCTION TO EXTRACT GEO SAMPLE FIELD
+# ------------------------------------------------------------
+
+extract_geo_field <- function(
+    file_path,
+    field_name
+) {
+
+    con <- file(
+        file_path,
+        open = "rt"
+    )
+
+    lines <- readLines(
+        con,
+        warn = FALSE
+    )
+
+    close(con)
+
+
+    target <- grep(
+        paste0(
+            "^!",
+            field_name,
+            "\t"
+        ),
+        lines,
+        ignore.case = TRUE
+    )
+
+
+    if (length(target) == 0) {
+
+        return(
+            character(0)
+        )
+    }
+
+
+    line_text <- lines[
+        target[1]
+    ]
+
+
+    field_df <- read.delim(
+        text = line_text,
+        header = FALSE,
+        sep = "\t",
+        quote = "\"",
+        comment.char = "",
+        check.names = FALSE,
+        stringsAsFactors = FALSE
+    )
+
+
+    if (ncol(field_df) < 2) {
+
+        return(
+            character(0)
+        )
+    }
+
+
+    values <- as.character(
+        field_df[
+            1,
+            2:ncol(field_df)
+        ]
+    )
+
+
+    values <- trimws(
+        values
+    )
+
+
+    return(
+        values
+    )
+}
+
+
+# ------------------------------------------------------------
+# 14A.7 — EXTRACT SAMPLE METADATA
+# ------------------------------------------------------------
+
+gpl571_sample_titles <- extract_geo_field(
+    gpl571_matrix,
+    "Sample_title"
+)
+
+gpl3921_sample_titles <- extract_geo_field(
+    gpl3921_matrix,
+    "Sample_title"
+)
+
+
+gpl571_sample_sources <- extract_geo_field(
+    gpl571_matrix,
+    "Sample_source_name_ch1"
+)
+
+gpl3921_sample_sources <- extract_geo_field(
+    gpl3921_matrix,
+    "Sample_source_name_ch1"
+)
+
+
+# ------------------------------------------------------------
+# 14A.8 — EXTRACT TISSUE INFORMATION
+# ------------------------------------------------------------
+
+extract_tissue_characteristics <- function(
+    file_path
+) {
+
+    con <- file(
+        file_path,
+        open = "rt"
+    )
+
+    lines <- readLines(
+        con,
+        warn = FALSE
+    )
+
+    close(con)
+
+
+    characteristic_lines <- grep(
+        "^!Sample_characteristics_ch1",
+        lines,
+        ignore.case = TRUE
+    )
+
+
+    if (length(characteristic_lines) == 0) {
+
+        return(
+            character(0)
+        )
+    }
+
+
+    output <- character(0)
+
+
+    for (line_number in characteristic_lines) {
+
+        line_text <- lines[
+            line_number
+        ]
+
+
+        field_df <- read.delim(
+            text = line_text,
+            header = FALSE,
+            sep = "\t",
+            quote = "\"",
+            comment.char = "",
+            check.names = FALSE,
+            stringsAsFactors = FALSE
+        )
+
+
+        if (ncol(field_df) < 2) {
+            next
+        }
+
+
+        values <- as.character(
+            field_df[
+                1,
+                2:ncol(field_df)
+            ]
+        )
+
+
+        tissue_values <- values[
+            grepl(
+                "Tissue:",
+                values,
+                ignore.case = TRUE
+            )
+        ]
+
+
+        if (length(tissue_values) > 0) {
+
+            output <- c(
+                output,
+                tissue_values
+            )
+        }
+    }
+
+
+    return(
+        output
+    )
+}
+
+
+gpl571_tissue_raw <- extract_tissue_characteristics(
+    gpl571_matrix
+)
+
+gpl3921_tissue_raw <- extract_tissue_characteristics(
+    gpl3921_matrix
+)
+
+
+# ------------------------------------------------------------
+# 14A.9 — CONVERT TISSUE ANNOTATION TO TUMOR/NON-TUMOR
+# ------------------------------------------------------------
+
+classify_tissue <- function(
+    x
+) {
+
+    x <- as.character(
+        x
+    )
+
+    result <- rep(
+        NA_character_,
+        length(x)
+    )
+
+
+    result[
+        grepl(
+            "Liver Tumor Tissue",
+            x,
+            ignore.case = TRUE
+        )
+    ] <- "HCC_TUMOR"
+
+
+    result[
+        grepl(
+            "Liver Non-Tumor Tissue",
+            x,
+            ignore.case = TRUE
+        )
+    ] <- "NON_TUMOR"
+
+
+    result[
+        grepl(
+            "healthy",
+            x,
+            ignore.case = TRUE
+        )
+    ] <- "HEALTHY_LIVER"
+
+
+    result
+}
+
+
+gpl571_tissue_class <- classify_tissue(
+    gpl571_tissue_raw
+)
+
+gpl3921_tissue_class <- classify_tissue(
+    gpl3921_tissue_raw
+)
+
+
+# ------------------------------------------------------------
+# 14A.10 — VERIFY METADATA LENGTHS
+# ------------------------------------------------------------
+
+cat("\n============================================================\n")
+cat("SAMPLE ANNOTATION COUNTS\n")
+cat("============================================================\n\n")
+
+cat(
+    "GPL571 expression samples:",
+    length(
+        gse14520_gpl571_sample_ids
+    ),
+    "\n"
+)
+
+cat(
+    "GPL571 tissue annotations:",
+    length(
+        gpl571_tissue_class
+    ),
+    "\n\n"
+)
+
+cat(
+    "GPL3921 expression samples:",
+    length(
+        gse14520_gpl3921_sample_ids
+    ),
+    "\n"
+)
+
+cat(
+    "GPL3921 tissue annotations:",
+    length(
+        gpl3921_tissue_class
+    ),
+    "\n\n"
+)
+
+
+if (
+    length(gpl571_tissue_class) !=
+    length(gse14520_gpl571_sample_ids)
+) {
+
+    stop(
+        "\nERROR: GPL571 tissue annotations do not match sample count.\n"
+    )
+}
+
+
+if (
+    length(gpl3921_tissue_class) !=
+    length(gse14520_gpl3921_sample_ids)
+) {
+
+    stop(
+        "\nERROR: GPL3921 tissue annotations do not match sample count.\n"
+    )
+}
+
+
+# ------------------------------------------------------------
+# 14A.11 — BUILD SAMPLE AUDIT TABLES
+# ------------------------------------------------------------
+
+gse14520_gpl571_sample_audit <- data.frame(
+    sample_id = gse14520_gpl571_sample_ids,
+    source = gpl571_sample_sources,
+    tissue = gpl571_tissue_class,
+    title = gpl571_sample_titles,
+    stringsAsFactors = FALSE
+)
+
+
+gse14520_gpl3921_sample_audit <- data.frame(
+    sample_id = gse14520_gpl3921_sample_ids,
+    source = gpl3921_sample_sources,
+    tissue = gpl3921_tissue_class,
+    title = gpl3921_sample_titles,
+    stringsAsFactors = FALSE
+)
+
+
+# ------------------------------------------------------------
+# 14A.12 — PRINT SAMPLE COUNTS
+# ------------------------------------------------------------
+
+cat("\n============================================================\n")
+cat("GPL571 SAMPLE COMPOSITION\n")
+cat("============================================================\n\n")
+
+print(
+    table(
+        gse14520_gpl571_sample_audit$tissue,
+        useNA = "ifany"
+    )
+)
+
+
+cat("\n============================================================\n")
+cat("GPL3921 SAMPLE COMPOSITION\n")
+cat("============================================================\n\n")
+
+print(
+    table(
+        gse14520_gpl3921_sample_audit$tissue,
+        useNA = "ifany"
+    )
+)
+
+
+# ------------------------------------------------------------
+# 14A.13 — DEFINE HCC TUMOR SAMPLES
+# ------------------------------------------------------------
+
+gse14520_gpl571_tumor_samples <- gse14520_gpl571_sample_audit[
+    gse14520_gpl571_sample_audit$tissue == "HCC_TUMOR",
+    ,
+    drop = FALSE
+]
+
+
+gse14520_gpl3921_tumor_samples <- gse14520_gpl3921_sample_audit[
+    gse14520_gpl3921_sample_audit$tissue == "HCC_TUMOR",
+    ,
+    drop = FALSE
+]
+
+
+cat("\n============================================================\n")
+cat("HCC TUMOR SAMPLE COUNTS\n")
+cat("============================================================\n\n")
+
+cat(
+    "GPL571 HCC tumor samples:",
+    nrow(
+        gse14520_gpl571_tumor_samples
+    ),
+    "\n"
+)
+
+cat(
+    "GPL3921 HCC tumor samples:",
+    nrow(
+        gse14520_gpl3921_tumor_samples
+    ),
+    "\n\n"
+)
+
+
+# ------------------------------------------------------------
+# 14A.14 — EXPRESSION SCALE AUDIT
+# ------------------------------------------------------------
+
+audit_expression_scale <- function(
+    expression_matrix,
+    platform
+) {
+
+    values <- as.numeric(
+        expression_matrix
+    )
+
+    values <- values[
+        is.finite(values)
+    ]
+
+
+    result <- data.frame(
+        platform = platform,
+        n_values = length(values),
+        minimum = min(
+            values,
+            na.rm = TRUE
+        ),
+        median = median(
+            values,
+            na.rm = TRUE
+        ),
+        maximum = max(
+            values,
+            na.rm = TRUE
+        ),
+        missing_values = sum(
+            !is.finite(
+                as.numeric(
+                    expression_matrix
+                )
+            )
+        ),
+        stringsAsFactors = FALSE
+    )
+
+
+    result
+}
+
+
+gse14520_expression_scale_audit <- rbind(
+    audit_expression_scale(
+        gse14520_gpl571_expression,
+        "GPL571"
+    ),
+    audit_expression_scale(
+        gse14520_gpl3921_expression,
+        "GPL3921"
+    )
+)
+
+
+cat("\n============================================================\n")
+cat("EXPRESSION SCALE AUDIT\n")
+cat("============================================================\n\n")
+
+print(
+    gse14520_expression_scale_audit
+)
+
+
+# ------------------------------------------------------------
+# 14A.15 — FROZEN 18-GENE PANEL
+# ------------------------------------------------------------
+
+gse14520_candidate_genes <- c(
+    "BARD1",
+    "BLM",
+    "EXO1",
+    "DMC1",
+    "PARP1",
+    "LIG1",
+    "XRCC6",
+    "XRCC2",
+    "EME1",
+    "DNA2",
+    "ATRIP",
+    "MDC1",
+    "XRCC3",
+    "RIF1",
+    "RPA1",
+    "TP53BP1",
+    "ATM",
+    "UIMC1"
+)
+
+
+cat("\n============================================================\n")
+cat("FROZEN 18-GENE VALIDATION PANEL\n")
+cat("============================================================\n\n")
+
+print(
+    gse14520_candidate_genes
+)
+
+
+# ------------------------------------------------------------
+# 14A.16 — READ PLATFORM ANNOTATIONS
+# ------------------------------------------------------------
+#
+# The uploaded annotation files contain:
+#
+#   ID
+#   Gene Symbol
+#   ENTREZ_GENE_ID
+#   etc.
+#
+# ------------------------------------------------------------
+
+gpl571_annotation <- read.delim(
+    gpl571_annotation,
+    header = TRUE,
+    sep = "\t",
+    quote = "",
+    comment.char = "#",
+    check.names = FALSE,
+    fill = TRUE,
+    stringsAsFactors = FALSE
+)
+
+
+gpl3921_annotation <- read.delim(
+    gpl3921_annotation,
+    header = TRUE,
+    sep = "\t",
+    quote = "",
+    comment.char = "#",
+    check.names = FALSE,
+    fill = TRUE,
+    stringsAsFactors = FALSE
+)
+
+
+# ------------------------------------------------------------
+# 14A.17 — VERIFY REQUIRED ANNOTATION COLUMNS
+# ------------------------------------------------------------
+
+required_annotation_columns <- c(
+    "ID",
+    "Gene Symbol"
+)
+
+
+if (
+    !all(
+        required_annotation_columns %in%
+        colnames(gpl571_annotation)
+    )
+) {
+
+    stop(
+        "\nERROR: GPL571 annotation does not contain the expected ID/Gene Symbol columns.\n"
+    )
+}
+
+
+if (
+    !all(
+        required_annotation_columns %in%
+        colnames(gpl3921_annotation)
+    )
+) {
+
+    stop(
+        "\nERROR: GPL3921 annotation does not contain the expected ID/Gene Symbol columns.\n"
+    )
+}
+
+
+# ------------------------------------------------------------
+# 14A.18 — BUILD PROBE → GENE MAPS
+# ------------------------------------------------------------
+
+gpl571_probe_map <- data.frame(
+    probe_id = as.character(
+        gpl571_annotation$ID
+    ),
+    gene_symbol = toupper(
+        trimws(
+            as.character(
+                gpl571_annotation$`Gene Symbol`
+            )
+        )
+    ),
+    stringsAsFactors = FALSE
+)
+
+
+gpl3921_probe_map <- data.frame(
+    probe_id = as.character(
+        gpl3921_annotation$ID
+    ),
+    gene_symbol = toupper(
+        trimws(
+            as.character(
+                gpl3921_annotation$`Gene Symbol`
+            )
+        )
+    ),
+    stringsAsFactors = FALSE
+)
+
+
+# ------------------------------------------------------------
+# 14A.19 — PROBE COVERAGE
+# ------------------------------------------------------------
+
+gpl571_annotated_probes <- sum(
+    rownames(
+        gse14520_gpl571_expression
+    ) %in%
+        gpl571_probe_map$probe_id
+)
+
+
+gpl3921_annotated_probes <- sum(
+    rownames(
+        gse14520_gpl3921_expression
+    ) %in%
+        gpl3921_probe_map$probe_id
+)
+
+
+cat("\n============================================================\n")
+cat("PROBE ANNOTATION COVERAGE\n")
+cat("============================================================\n\n")
+
+cat(
+    "GPL571 annotated probes:",
+    gpl571_annotated_probes,
+    "/",
+    nrow(
+        gse14520_gpl571_expression
+    ),
+    "\n"
+)
+
+cat(
+    "GPL3921 annotated probes:",
+    gpl3921_annotated_probes,
+    "/",
+    nrow(
+        gse14520_gpl3921_expression
+    ),
+    "\n\n"
+)
+
+
+# ------------------------------------------------------------
+# 14A.20 — 18-GENE COVERAGE
+# ------------------------------------------------------------
+
+gpl571_candidate_coverage <- data.frame(
+    gene = gse14520_candidate_genes,
+    present = gse14520_candidate_genes %in%
+        gpl571_probe_map$gene_symbol,
+    stringsAsFactors = FALSE
+)
+
+
+gpl3921_candidate_coverage <- data.frame(
+    gene = gse14520_candidate_genes,
+    present = gse14520_candidate_genes %in%
+        gpl3921_probe_map$gene_symbol,
+    stringsAsFactors = FALSE
+)
+
+
+cat("\n============================================================\n")
+cat("18-GENE COVERAGE — GPL571\n")
+cat("============================================================\n\n")
+
+print(
+    gpl571_candidate_coverage
+)
+
+cat(
+    "\nGenes covered:",
+    sum(
+        gpl571_candidate_coverage$present
+    ),
+    "/",
+    length(
+        gse14520_candidate_genes
+    ),
+    "\n"
+)
+
+
+cat("\n============================================================\n")
+cat("18-GENE COVERAGE — GPL3921\n")
+cat("============================================================\n\n")
+
+print(
+    gpl3921_candidate_coverage
+)
+
+cat(
+    "\nGenes covered:",
+    sum(
+        gpl3921_candidate_coverage$present
+    ),
+    "/",
+    length(
+        gse14520_candidate_genes
+    ),
+    "\n"
+)
+
+
+# ------------------------------------------------------------
+# 14A.21 — NUMBER OF PROBES PER CANDIDATE GENE
+# ------------------------------------------------------------
+
+gpl571_candidate_probe_counts <- data.frame(
+    gene = gse14520_candidate_genes,
+    probe_count = sapply(
+        gse14520_candidate_genes,
+        function(gene) {
+            sum(
+                gpl571_probe_map$gene_symbol == gene,
+                na.rm = TRUE
+            )
+        }
+    ),
+    stringsAsFactors = FALSE
+)
+
+
+gpl3921_candidate_probe_counts <- data.frame(
+    gene = gse14520_candidate_genes,
+    probe_count = sapply(
+        gse14520_candidate_genes,
+        function(gene) {
+            sum(
+                gpl3921_probe_map$gene_symbol == gene,
+                na.rm = TRUE
+            )
+        }
+    ),
+    stringsAsFactors = FALSE
+)
+
+
+cat("\n============================================================\n")
+cat("PROBE COUNTS FOR 18 CANDIDATE GENES\n")
+cat("============================================================\n\n")
+
+cat("GPL571:\n")
+print(
+    gpl571_candidate_probe_counts
+)
+
+cat("\nGPL3921:\n")
+print(
+    gpl3921_candidate_probe_counts
+)
+
+
+# ------------------------------------------------------------
+# 14A.22 — DUPLICATE PROBE IDS
+# ------------------------------------------------------------
+
+cat("\n============================================================\n")
+cat("DUPLICATE PROBE ID CHECK\n")
+cat("============================================================\n\n")
+
+cat(
+    "GPL571 duplicate expression probe IDs:",
+    sum(
+        duplicated(
+            rownames(
+                gse14520_gpl571_expression
+            )
+        )
+    ),
+    "\n"
+)
+
+cat(
+    "GPL3921 duplicate expression probe IDs:",
+    sum(
+        duplicated(
+            rownames(
+                gse14520_gpl3921_expression
+            )
+        )
+    ),
+    "\n\n"
+)
+
+
+# ------------------------------------------------------------
+# 14A.23 — SAMPLE OVERLAP BETWEEN PLATFORMS
+# ------------------------------------------------------------
+
+common_sample_ids <- intersect(
+    gse14520_gpl571_sample_ids,
+    gse14520_gpl3921_sample_ids
+)
+
+
+cat("\n============================================================\n")
+cat("CROSS-PLATFORM SAMPLE OVERLAP\n")
+cat("============================================================\n\n")
+
+cat(
+    "GPL571 samples:",
+    length(
+        gse14520_gpl571_sample_ids
+    ),
+    "\n"
+)
+
+cat(
+    "GPL3921 samples:",
+    length(
+        gse14520_gpl3921_sample_ids
+    ),
+    "\n"
+)
+
+cat(
+    "Common sample IDs:",
+    length(
+        common_sample_ids
+    ),
+    "\n\n"
+)
+
+
+# ------------------------------------------------------------
+# 14A.24 — FINAL AUDIT SUMMARY
+# ------------------------------------------------------------
+
+gse14520_audit_summary <- data.frame(
+    platform = c(
+        "GPL571",
+        "GPL3921"
+    ),
+    probes = c(
+        nrow(
+            gse14520_gpl571_expression
+        ),
+        nrow(
+            gse14520_gpl3921_expression
+        )
+    ),
+    samples = c(
+        ncol(
+            gse14520_gpl571_expression
+        ),
+        ncol(
+            gse14520_gpl3921_expression
+        )
+    ),
+    hcc_tumor_samples = c(
+        nrow(
+            gse14520_gpl571_tumor_samples
+        ),
+        nrow(
+            gse14520_gpl3921_tumor_samples
+        )
+    ),
+    annotated_probes = c(
+        gpl571_annotated_probes,
+        gpl3921_annotated_probes
+    ),
+    candidate_genes_covered = c(
+        sum(
+            gpl571_candidate_coverage$present
+        ),
+        sum(
+            gpl3921_candidate_coverage$present
+        )
+    ),
+    stringsAsFactors = FALSE
+)
+
+
+cat("\n============================================================\n")
+cat("FINAL STEP 14A SUMMARY\n")
+cat("============================================================\n\n")
+
+print(
+    gse14520_audit_summary
+)
+
+
+# ------------------------------------------------------------
+# 14A.25 — SAVE AUDIT RESULTS
+# ------------------------------------------------------------
+
+write.csv(
+    gse14520_gpl571_sample_audit,
+    file.path(
+        results_dir,
+        "Step14A_GSE14520_GPL571_sample_audit.csv"
+    ),
+    row.names = FALSE
+)
+
+
+write.csv(
+    gse14520_gpl3921_sample_audit,
+    file.path(
+        results_dir,
+        "Step14A_GSE14520_GPL3921_sample_audit.csv"
+    ),
+    row.names = FALSE
+)
+
+
+write.csv(
+    gse14520_audit_summary,
+    file.path(
+        results_dir,
+        "Step14A_GSE14520_input_audit_summary.csv"
+    ),
+    row.names = FALSE
+)
+
+
+write.csv(
+    gpl571_candidate_coverage,
+    file.path(
+        results_dir,
+        "Step14A_GPL571_18_gene_coverage.csv"
+    ),
+    row.names = FALSE
+)
+
+
+write.csv(
+    gpl3921_candidate_coverage,
+    file.path(
+        results_dir,
+        "Step14A_GPL3921_18_gene_coverage.csv"
+    ),
+    row.names = FALSE
+)
+
+
+write.csv(
+    gpl571_candidate_probe_counts,
+    file.path(
+        results_dir,
+        "Step14A_GPL571_candidate_probe_counts.csv"
+    ),
+    row.names = FALSE
+)
+
+
+write.csv(
+    gpl3921_candidate_probe_counts,
+    file.path(
+        results_dir,
+        "Step14A_GPL3921_candidate_probe_counts.csv"
+    ),
+    row.names = FALSE
+)
+
+
+save(
+    gse14520_gpl571_expression,
+    gse14520_gpl3921_expression,
+    gse14520_gpl571_sample_audit,
+    gse14520_gpl3921_sample_audit,
+    gse14520_gpl571_tumor_samples,
+    gse14520_gpl3921_tumor_samples,
+    gpl571_probe_map,
+    gpl3921_probe_map,
+    gse14520_candidate_genes,
+    gpl571_candidate_coverage,
+    gpl3921_candidate_coverage,
+    gse14520_audit_summary,
+    file = file.path(
+        results_dir,
+        "Step14A_GSE14520_input_audit.RData"
+    )
+)
+
+
+# ------------------------------------------------------------
+# 14A.26 — STOP
+# ------------------------------------------------------------
+
+cat("\n\n============================================================\n")
+cat("STEP 14A COMPLETE\n")
+cat("============================================================\n\n")
+
+cat(
+    "Input audit completed successfully.\n\n"
+)
+
+cat(
+    "GPL571 and GPL3921 were kept separate.\n"
+)
+
+cat(
+    "No re-normalization was performed.\n"
+)
+
+cat(
+    "No platform merging was performed.\n"
+)
+
+cat(
+    "No lipid score was calculated.\n"
+)
+
+cat(
+    "No HR/DDR/NHEJ score was calculated.\n"
+)
+
+cat(
+    "No gene-level correlations were calculated.\n"
+)
+
+cat(
+    "No new candidate genes were introduced.\n\n"
+)
+
+cat(
+    "The next step will use the verified HCC tumor samples\n",
+    "and platform-specific probe mappings.\n\n"
+)
+
+cat(
+    "============================================================\n"
+)
