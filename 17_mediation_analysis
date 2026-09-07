@@ -1,0 +1,1209 @@
+# ============================================================
+# MAFLD-HCC MANUSCRIPT
+# THREE-FOLD MEDIATION ANALYSIS
+#
+# MODEL 1:
+# Lipid phenotype -> p53 activity -> DDR pathway
+#
+# MODEL 2:
+# Lipid phenotype -> replication stress -> DSB repair
+#
+# MODEL 3:
+# Lipid phenotype -> replication stress -> Fanconi / HR repair
+#
+# DATASETS:
+#   TCGA
+#   GSE76427
+#
+# OUTPUT:
+#   results/mediation/
+#
+# IMPORTANT:
+# This is an association-based mediation analysis.
+# It does NOT establish causal mediation in cross-sectional
+# transcriptomic data.
+#
+# No [[ ]] indexing is used in this script.
+# ============================================================
+
+
+# ============================================================
+# 1. PACKAGES
+# ============================================================
+
+required_packages <- c(
+  "mediation",
+  "dplyr",
+  "tibble",
+  "readr"
+)
+
+
+for (pkg in required_packages) {
+
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+
+    install.packages(
+      pkg,
+      repos = "https://cloud.r-project.org"
+    )
+  }
+}
+
+
+library(mediation)
+library(dplyr)
+library(tibble)
+library(readr)
+
+
+# ============================================================
+# 2. CREATE RESULTS DIRECTORY
+# ============================================================
+
+results_dir <- file.path(
+  "results",
+  "mediation"
+)
+
+
+if (!dir.exists(results_dir)) {
+
+  dir.create(
+    results_dir,
+    recursive = TRUE
+  )
+}
+
+
+# ============================================================
+# 3. USER-DEFINED PRIMARY VARIABLES
+# ============================================================
+
+# Primary lipid/metabolic phenotype.
+#
+# This is the lipid pathway present in the pathway matrices
+# shown previously.
+#
+# If you have a predefined composite lipid score, replace
+# this name with that score.
+
+lipid_variable <- "HALLMARK_FATTY_ACID_METABOLISM"
+
+
+# p53 mediator variables
+
+p53_variables <- c(
+  "P53_PATHWAY",
+  "P53_DEPENDENT_G1_DNA_DAMAGE_RESPONSE"
+)
+
+
+# Replication-stress mediator
+
+replication_stress_variable <-
+  "ATR_MEDIATED_REPLICATION_STRESS"
+
+
+# Primary DSB outcome
+
+dsb_variable <-
+  "DOUBLE_STRAND_BREAK_REPAIR"
+
+
+# Fanconi outcome
+
+fanconi_variable <-
+  "FANCONI_REPAIR"
+
+
+# HR outcome
+
+hr_variable <-
+  "HOMOLOGOUS_RECOMBINATION"
+
+
+# ============================================================
+# 4. CHECK REQUIRED OBJECTS
+# ============================================================
+
+required_objects <- c(
+  "tcga_pathway_scores",
+  "gse_pathway_scores"
+)
+
+
+for (object_name in required_objects) {
+
+  if (!exists(object_name)) {
+
+    stop(
+      paste0(
+        "\nRequired object not found: ",
+        object_name,
+        "\n"
+      )
+    )
+  }
+}
+
+
+# ============================================================
+# 5. BASIC DATA CLEANING FUNCTION
+# ============================================================
+
+prepare_mediation_data <- function(
+    pathway_matrix,
+    x_variable,
+    mediator_variable,
+    outcome_variable
+) {
+
+  pathway_matrix <- as.matrix(
+    pathway_matrix
+  )
+
+
+  required_rows <- c(
+    x_variable,
+    mediator_variable,
+    outcome_variable
+  )
+
+
+  missing_rows <- setdiff(
+    required_rows,
+    rownames(pathway_matrix)
+  )
+
+
+  if (length(missing_rows) > 0) {
+
+    stop(
+      paste0(
+        "\nMissing pathway variables:\n",
+        paste(
+          missing_rows,
+          collapse = "\n"
+        )
+      )
+    )
+  }
+
+
+  data <- data.frame(
+    sample_id = colnames(pathway_matrix),
+    X = as.numeric(
+      pathway_matrix[
+        x_variable,
+        ,
+        drop = TRUE
+      ]
+    ),
+    M = as.numeric(
+      pathway_matrix[
+        mediator_variable,
+        ,
+        drop = TRUE
+      ]
+    ),
+    Y = as.numeric(
+      pathway_matrix[
+        outcome_variable,
+        ,
+        drop = TRUE
+      ]
+    ),
+    stringsAsFactors = FALSE
+  )
+
+
+  data <- data[
+    is.finite(data$X) &
+    is.finite(data$M) &
+    is.finite(data$Y),
+    ,
+    drop = FALSE
+  ]
+
+
+  if (nrow(data) < 30) {
+
+    stop(
+      paste0(
+        "\nFewer than 30 complete observations for:\n",
+        x_variable,
+        " -> ",
+        mediator_variable,
+        " -> ",
+        outcome_variable
+      )
+    )
+  }
+
+
+  data
+}
+
+
+# ============================================================
+# 6. MEDIATION FUNCTION
+# ============================================================
+
+run_single_mediation <- function(
+    pathway_matrix,
+    dataset_name,
+    model_name,
+    x_variable,
+    mediator_variable,
+    outcome_variable,
+    bootstrap_sims = 5000
+) {
+
+  mediation_data <- prepare_mediation_data(
+    pathway_matrix = pathway_matrix,
+    x_variable = x_variable,
+    mediator_variable = mediator_variable,
+    outcome_variable = outcome_variable
+  )
+
+
+  # ----------------------------------------------------------
+  # Mediator model
+  #
+  # M = aX + error
+  # ----------------------------------------------------------
+
+  mediator_model <- lm(
+    M ~ X,
+    data = mediation_data
+  )
+
+
+  # ----------------------------------------------------------
+  # Outcome model
+  #
+  # Y = c'X + bM + error
+  # ----------------------------------------------------------
+
+  outcome_model <- lm(
+    Y ~ X + M,
+    data = mediation_data
+  )
+
+
+  # ----------------------------------------------------------
+  # Mediation
+  # ----------------------------------------------------------
+
+  mediation_fit <- mediation::mediate(
+    model.m = mediator_model,
+    model.y = outcome_model,
+    treat = "X",
+    mediator = "M",
+    boot = TRUE,
+    sims = bootstrap_sims
+  )
+
+
+  # ----------------------------------------------------------
+  # Extract estimates
+  # ----------------------------------------------------------
+
+  summary_fit <- summary(
+    mediation_fit
+  )
+
+
+  result <- tibble(
+    dataset = dataset_name,
+    model = model_name,
+    X = x_variable,
+    mediator = mediator_variable,
+    outcome = outcome_variable,
+    n = nrow(mediation_data),
+
+    total_effect = as.numeric(
+      summary_fit$tau.coef
+    ),
+
+    total_effect_p = as.numeric(
+      summary_fit$tau.p
+    ),
+
+    indirect_effect_acme = as.numeric(
+      summary_fit$d.avg
+    ),
+
+    indirect_effect_ci_low = as.numeric(
+      summary_fit$d.avg.ci[1]
+    ),
+
+    indirect_effect_ci_high = as.numeric(
+      summary_fit$d.avg.ci[2]
+    ),
+
+    indirect_effect_p = as.numeric(
+      summary_fit$d.avg.p
+    ),
+
+    direct_effect_ade = as.numeric(
+      summary_fit$z.avg
+    ),
+
+    direct_effect_ci_low = as.numeric(
+      summary_fit$z.avg.ci[1]
+    ),
+
+    direct_effect_ci_high = as.numeric(
+      summary_fit$z.avg.ci[2]
+    ),
+
+    direct_effect_p = as.numeric(
+      summary_fit$z.avg.p
+    ),
+
+    proportion_mediated = as.numeric(
+      summary_fit$n.avg
+    ),
+
+    proportion_mediated_ci_low = as.numeric(
+      summary_fit$n.avg.ci[1]
+    ),
+
+    proportion_mediated_ci_high = as.numeric(
+      summary_fit$n.avg.ci[2]
+    ),
+
+    proportion_mediated_p = as.numeric(
+      summary_fit$n.avg.p
+    )
+  )
+
+
+  # ----------------------------------------------------------
+  # Additional regression coefficients
+  # ----------------------------------------------------------
+
+  mediator_coefficients <- coef(
+    summary(
+      mediator_model
+    )
+  )
+
+
+  outcome_coefficients <- coef(
+    summary(
+      outcome_model
+    )
+  )
+
+
+  result$a_path_estimate <- as.numeric(
+    mediator_coefficients[
+      "X",
+      "Estimate"
+    ]
+  )
+
+
+  result$a_path_p <- as.numeric(
+    mediator_coefficients[
+      "X",
+      "Pr(>|t|)"
+    ]
+  )
+
+
+  result$b_path_estimate <- as.numeric(
+    outcome_coefficients[
+      "M",
+      "Estimate"
+    ]
+  )
+
+
+  result$b_path_p <- as.numeric(
+    outcome_coefficients[
+      "M",
+      "Pr(>|t|)"
+    ]
+  )
+
+
+  result$direct_x_effect_estimate <- as.numeric(
+    outcome_coefficients[
+      "X",
+      "Estimate"
+    ]
+  )
+
+
+  result$direct_x_effect_p <- as.numeric(
+    outcome_coefficients[
+      "X",
+      "Pr(>|t|)"
+    ]
+  )
+
+
+  result$significant_indirect <- (
+    result$indirect_effect_p < 0.05
+  )
+
+
+  result$bootstrap_excludes_zero <- (
+    result$indirect_effect_ci_low > 0 |
+    result$indirect_effect_ci_high < 0
+  )
+
+
+  list(
+    result = result,
+    mediation_object = mediation_fit,
+    mediator_model = mediator_model,
+    outcome_model = outcome_model,
+    data = mediation_data
+  )
+}
+
+
+# ============================================================
+# 7. DEFINE THE THREE-FOLD ANALYSIS
+# ============================================================
+
+
+# ------------------------------------------------------------
+# MODEL 1
+#
+# Lipid phenotype
+#       ↓
+#     p53
+#       ↓
+# DDR pathways
+#
+# Test both p53 scores against the principal DDR outcomes.
+# ------------------------------------------------------------
+
+model_1_outcomes <- c(
+  "HOMOLOGOUS_RECOMBINATION",
+  "MISMATCH_REPAIR",
+  "BASE_EXCISION_REPAIR",
+  "DOUBLE_STRAND_BREAK_REPAIR",
+  "NON_HOMOLOGOUS_END_JOINING",
+  "HALLMARK_DNA_REPAIR",
+  "G2M_CHECKPOINT"
+)
+
+
+# ------------------------------------------------------------
+# MODEL 2
+#
+# Lipid phenotype
+#       ↓
+# Replication stress
+#       ↓
+# DSB repair
+# ------------------------------------------------------------
+
+model_2_outcomes <- c(
+  "DOUBLE_STRAND_BREAK_REPAIR",
+  "HOMOLOGOUS_RECOMBINATION",
+  "NON_HOMOLOGOUS_END_JOINING"
+)
+
+
+# ------------------------------------------------------------
+# MODEL 3
+#
+# Lipid phenotype
+#       ↓
+# Replication stress
+#       ↓
+# Fanconi / HR repair
+# ------------------------------------------------------------
+
+model_3_outcomes <- c(
+  "FANCONI_REPAIR",
+  "HOMOLOGOUS_RECOMBINATION"
+)
+
+
+# ============================================================
+# 8. GENERIC MEDIATION RUNNER
+# ============================================================
+
+run_model_set <- function(
+    pathway_matrix,
+    dataset_name,
+    model_name,
+    x_variable,
+    mediator_variables,
+    outcome_variables,
+    bootstrap_sims = 5000
+) {
+
+  all_results <- list()
+
+  all_objects <- list()
+
+  counter <- 1
+
+
+  for (mediator_variable in mediator_variables) {
+
+    for (outcome_variable in outcome_variables) {
+
+      cat(
+        "\nRunning:",
+        dataset_name,
+        "|",
+        model_name,
+        "|",
+        x_variable,
+        "->",
+        mediator_variable,
+        "->",
+        outcome_variable,
+        "\n"
+      )
+
+
+      required_rows <- c(
+        x_variable,
+        mediator_variable,
+        outcome_variable
+      )
+
+
+      missing_rows <- setdiff(
+        required_rows,
+        rownames(pathway_matrix)
+      )
+
+
+      if (length(missing_rows) > 0) {
+
+        cat(
+          "  SKIPPED: missing pathway(s): ",
+          paste(
+            missing_rows,
+            collapse = ", "
+          ),
+          "\n",
+          sep = ""
+        )
+
+        next
+      }
+
+
+      mediation_run <- tryCatch(
+
+        run_single_mediation(
+          pathway_matrix = pathway_matrix,
+          dataset_name = dataset_name,
+          model_name = model_name,
+          x_variable = x_variable,
+          mediator_variable = mediator_variable,
+          outcome_variable = outcome_variable,
+          bootstrap_sims = bootstrap_sims
+        ),
+
+        error = function(e) {
+
+          cat(
+            "  ERROR: ",
+            conditionMessage(e),
+            "\n",
+            sep = ""
+          )
+
+          NULL
+        }
+      )
+
+
+      if (!is.null(mediation_run)) {
+
+        all_results[[counter]] <- mediation_run$result
+
+        object_name <- paste(
+          dataset_name,
+          model_name,
+          mediator_variable,
+          outcome_variable,
+          sep = "_"
+        )
+
+        object_name <- gsub(
+          "[^A-Za-z0-9_]",
+          "_",
+          object_name
+        )
+
+
+        all_objects[
+          object_name
+        ] <- list(
+          mediation_run
+        )
+
+
+        counter <- counter + 1
+      }
+    }
+  }
+
+
+  if (length(all_results) == 0) {
+
+    return(
+      list(
+        results = tibble(),
+        objects = list()
+      )
+    )
+  }
+
+
+  combined_results <- bind_rows(
+    all_results
+  )
+
+
+  list(
+    results = combined_results,
+    objects = all_objects
+  )
+}
+
+
+# ============================================================
+# 9. RUN TCGA MODEL 1
+# ============================================================
+
+cat(
+  "\n\n============================================\n",
+  "TCGA MODEL 1: p53 MEDIATION OF DDR\n",
+  "============================================\n"
+)
+
+
+tcga_model_1 <- run_model_set(
+  pathway_matrix = tcga_pathway_scores,
+  dataset_name = "TCGA",
+  model_name = "MODEL_1_P53_MEDIATION",
+  x_variable = lipid_variable,
+  mediator_variables = p53_variables,
+  outcome_variables = model_1_outcomes,
+  bootstrap_sims = 5000
+)
+
+
+# ============================================================
+# 10. RUN TCGA MODEL 2
+# ============================================================
+
+cat(
+  "\n\n============================================\n",
+  "TCGA MODEL 2: REPLICATION STRESS MEDIATION OF DSB\n",
+  "============================================\n"
+)
+
+
+tcga_model_2 <- run_model_set(
+  pathway_matrix = tcga_pathway_scores,
+  dataset_name = "TCGA",
+  model_name = "MODEL_2_REPLICATION_STRESS_DSB",
+  x_variable = lipid_variable,
+  mediator_variables = c(
+    replication_stress_variable
+  ),
+  outcome_variables = model_2_outcomes,
+  bootstrap_sims = 5000
+)
+
+
+# ============================================================
+# 11. RUN TCGA MODEL 3
+# ============================================================
+
+cat(
+  "\n\n============================================\n",
+  "TCGA MODEL 3: REPLICATION STRESS MEDIATION OF FANCONI / HR\n",
+  "============================================\n"
+)
+
+
+tcga_model_3 <- run_model_set(
+  pathway_matrix = tcga_pathway_scores,
+  dataset_name = "TCGA",
+  model_name = "MODEL_3_REPLICATION_STRESS_FANCONI_HR",
+  x_variable = lipid_variable,
+  mediator_variables = c(
+    replication_stress_variable
+  ),
+  outcome_variables = model_3_outcomes,
+  bootstrap_sims = 5000
+)
+
+
+# ============================================================
+# 12. RUN GSE76427 MODEL 1
+# ============================================================
+
+cat(
+  "\n\n============================================\n",
+  "GSE76427 MODEL 1: p53 MEDIATION OF DDR\n",
+  "============================================\n"
+)
+
+
+gse_model_1 <- run_model_set(
+  pathway_matrix = gse_pathway_scores,
+  dataset_name = "GSE76427",
+  model_name = "MODEL_1_P53_MEDIATION",
+  x_variable = lipid_variable,
+  mediator_variables = p53_variables,
+  outcome_variables = model_1_outcomes,
+  bootstrap_sims = 5000
+)
+
+
+# ============================================================
+# 13. RUN GSE76427 MODEL 2
+# ============================================================
+
+cat(
+  "\n\n============================================\n",
+  "GSE76427 MODEL 2: REPLICATION STRESS MEDIATION OF DSB\n",
+  "============================================\n"
+)
+
+
+gse_model_2 <- run_model_set(
+  pathway_matrix = gse_pathway_scores,
+  dataset_name = "GSE76427",
+  model_name = "MODEL_2_REPLICATION_STRESS_DSB",
+  x_variable = lipid_variable,
+  mediator_variables = c(
+    replication_stress_variable
+  ),
+  outcome_variables = model_2_outcomes,
+  bootstrap_sims = 5000
+)
+
+
+# ============================================================
+# 14. RUN GSE76427 MODEL 3
+# ============================================================
+
+cat(
+  "\n\n============================================\n",
+  "GSE76427 MODEL 3: REPLICATION STRESS MEDIATION OF FANCONI / HR\n",
+  "============================================\n"
+)
+
+
+gse_model_3 <- run_model_set(
+  pathway_matrix = gse_pathway_scores,
+  dataset_name = "GSE76427",
+  model_name = "MODEL_3_REPLICATION_STRESS_FANCONI_HR",
+  x_variable = lipid_variable,
+  mediator_variables = c(
+    replication_stress_variable
+  ),
+  outcome_variables = model_3_outcomes,
+  bootstrap_sims = 5000
+)
+
+
+# ============================================================
+# 15. COMBINE ALL RESULTS
+# ============================================================
+
+all_mediation_results <- bind_rows(
+  tcga_model_1$results,
+  tcga_model_2$results,
+  tcga_model_3$results,
+  gse_model_1$results,
+  gse_model_2$results,
+  gse_model_3$results
+)
+
+
+# ============================================================
+# 16. FDR CORRECTION
+# ============================================================
+#
+# Correct across all indirect-effect tests.
+#
+# This is deliberately applied to the mediation tests rather
+# than to every regression coefficient separately.
+# ============================================================
+
+if (nrow(all_mediation_results) > 0) {
+
+  all_mediation_results$indirect_effect_fdr <- p.adjust(
+    all_mediation_results$indirect_effect_p,
+    method = "BH"
+  )
+
+
+  all_mediation_results$significant_indirect_fdr <- (
+    all_mediation_results$indirect_effect_fdr < 0.05
+  )
+
+
+  all_mediation_results$bootstrap_and_fdr_supported <- (
+    all_mediation_results$bootstrap_excludes_zero &
+    all_mediation_results$significant_indirect_fdr
+  )
+}
+
+
+# ============================================================
+# 17. ORDER RESULTS
+# ============================================================
+
+if (nrow(all_mediation_results) > 0) {
+
+  all_mediation_results <- all_mediation_results %>%
+    arrange(
+      indirect_effect_fdr,
+      dataset,
+      model,
+      mediator,
+      outcome
+    )
+}
+
+
+# ============================================================
+# 18. CREATE MODEL-SPECIFIC TABLES
+# ============================================================
+
+tcga_results <- all_mediation_results %>%
+  filter(
+    dataset == "TCGA"
+  )
+
+
+gse76427_results <- all_mediation_results %>%
+  filter(
+    dataset == "GSE76427"
+  )
+
+
+model_1_results <- all_mediation_results %>%
+  filter(
+    grepl(
+      "MODEL_1",
+      model
+    )
+  )
+
+
+model_2_results <- all_mediation_results %>%
+  filter(
+    grepl(
+      "MODEL_2",
+      model
+    )
+  )
+
+
+model_3_results <- all_mediation_results %>%
+  filter(
+    grepl(
+      "MODEL_3",
+      model
+    )
+  )
+
+
+# ============================================================
+# 19. SAVE MASTER RESULTS
+# ============================================================
+
+write_csv(
+  all_mediation_results,
+  file.path(
+    results_dir,
+    "THREE_FOLD_MEDIATION_ALL_RESULTS.csv"
+  )
+)
+
+
+saveRDS(
+  all_mediation_results,
+  file.path(
+    results_dir,
+    "THREE_FOLD_MEDIATION_ALL_RESULTS.rds"
+  )
+)
+
+
+# ============================================================
+# 20. SAVE DATASET-SPECIFIC RESULTS
+# ============================================================
+
+write_csv(
+  tcga_results,
+  file.path(
+    results_dir,
+    "THREE_FOLD_MEDIATION_TCGA_RESULTS.csv"
+  )
+)
+
+
+write_csv(
+  gse76427_results,
+  file.path(
+    results_dir,
+    "THREE_FOLD_MEDIATION_GSE76427_RESULTS.csv"
+  )
+)
+
+
+# ============================================================
+# 21. SAVE MODEL-SPECIFIC RESULTS
+# ============================================================
+
+write_csv(
+  model_1_results,
+  file.path(
+    results_dir,
+    "MEDIATION_MODEL_1_P53_DDR_RESULTS.csv"
+  )
+)
+
+
+write_csv(
+  model_2_results,
+  file.path(
+    results_dir,
+    "MEDIATION_MODEL_2_REPLICATION_STRESS_DSB_RESULTS.csv"
+  )
+)
+
+
+write_csv(
+  model_3_results,
+  file.path(
+    results_dir,
+    "MEDIATION_MODEL_3_REPLICATION_STRESS_FANCONI_HR_RESULTS.csv"
+  )
+)
+
+
+# ============================================================
+# 22. SAVE COMPLETE ANALYSIS OBJECTS
+# ============================================================
+
+three_fold_mediation_objects <- list(
+  TCGA_MODEL_1 = tcga_model_1,
+  TCGA_MODEL_2 = tcga_model_2,
+  TCGA_MODEL_3 = tcga_model_3,
+  GSE76427_MODEL_1 = gse_model_1,
+  GSE76427_MODEL_2 = gse_model_2,
+  GSE76427_MODEL_3 = gse_model_3
+)
+
+
+saveRDS(
+  three_fold_mediation_objects,
+  file.path(
+    results_dir,
+    "THREE_FOLD_MEDIATION_COMPLETE_OBJECTS.rds"
+  )
+)
+
+
+# ============================================================
+# 23. CREATE A CLEAN "KEY RESULTS" TABLE
+# ============================================================
+#
+# This is the table that will be easiest to inspect for the
+# manuscript.
+#
+# It prioritizes the indirect effect and its bootstrap CI/FDR.
+# ============================================================
+
+if (nrow(all_mediation_results) > 0) {
+
+  key_mediation_results <- all_mediation_results %>%
+    select(
+      dataset,
+      model,
+      X,
+      mediator,
+      outcome,
+      n,
+      total_effect,
+      total_effect_p,
+      indirect_effect_acme,
+      indirect_effect_ci_low,
+      indirect_effect_ci_high,
+      indirect_effect_p,
+      indirect_effect_fdr,
+      direct_effect_ade,
+      direct_effect_p,
+      proportion_mediated,
+      proportion_mediated_ci_low,
+      proportion_mediated_ci_high,
+      bootstrap_excludes_zero,
+      significant_indirect_fdr,
+      bootstrap_and_fdr_supported
+    ) %>%
+    arrange(
+      indirect_effect_fdr
+    )
+
+
+  write_csv(
+    key_mediation_results,
+    file.path(
+      results_dir,
+      "THREE_FOLD_MEDIATION_KEY_RESULTS.csv"
+    )
+  )
+
+
+  saveRDS(
+    key_mediation_results,
+    file.path(
+      results_dir,
+      "THREE_FOLD_MEDIATION_KEY_RESULTS.rds"
+    )
+  )
+}
+
+
+# ============================================================
+# 24. PRINT IMPORTANT RESULTS
+# ============================================================
+
+cat(
+  "\n\n============================================\n",
+  "THREE-FOLD MEDIATION ANALYSIS COMPLETE\n",
+  "============================================\n\n"
+)
+
+
+cat(
+  "Lipid X variable:\n  ",
+  lipid_variable,
+  "\n\n",
+  sep = ""
+)
+
+
+cat(
+  "Total mediation tests completed: ",
+  nrow(all_mediation_results),
+  "\n\n",
+  sep = ""
+)
+
+
+if (nrow(all_mediation_results) > 0) {
+
+  cat(
+    "FDR-significant indirect effects: ",
+    sum(
+      all_mediation_results$significant_indirect_fdr,
+      na.rm = TRUE
+    ),
+    "\n",
+    sep = ""
+  )
+
+
+  cat(
+    "Bootstrap CI excludes zero: ",
+    sum(
+      all_mediation_results$bootstrap_excludes_zero,
+      na.rm = TRUE
+    ),
+    "\n",
+    sep = ""
+  )
+
+
+  cat(
+    "Both bootstrap + FDR supported: ",
+    sum(
+      all_mediation_results$bootstrap_and_fdr_supported,
+      na.rm = TRUE
+    ),
+    "\n\n",
+    sep = ""
+  )
+
+
+  cat(
+    "TOP MEDIATION RESULTS:\n\n"
+  )
+
+
+  print(
+    all_mediation_results %>%
+      select(
+        dataset,
+        model,
+        mediator,
+        outcome,
+        indirect_effect_acme,
+        indirect_effect_ci_low,
+        indirect_effect_ci_high,
+        indirect_effect_p,
+        indirect_effect_fdr,
+        bootstrap_and_fdr_supported
+      ) %>%
+      head(20)
+  )
+}
+
+
+# ============================================================
+# 25. PRINT OUTPUT LOCATION
+# ============================================================
+
+cat(
+  "\n\nResults saved to:\n  ",
+  normalizePath(
+    results_dir,
+    winslash = "/",
+    mustWork = FALSE
+  ),
+  "\n\n",
+  sep = ""
+)
+
+
+cat(
+  "Main files:\n",
+  "  THREE_FOLD_MEDIATION_ALL_RESULTS.csv\n",
+  "  THREE_FOLD_MEDIATION_KEY_RESULTS.csv\n",
+  "  THREE_FOLD_MEDIATION_TCGA_RESULTS.csv\n",
+  "  THREE_FOLD_MEDIATION_GSE76427_RESULTS.csv\n",
+  "  MEDIATION_MODEL_1_P53_DDR_RESULTS.csv\n",
+  "  MEDIATION_MODEL_2_REPLICATION_STRESS_DSB_RESULTS.csv\n",
+  "  MEDIATION_MODEL_3_REPLICATION_STRESS_FANCONI_HR_RESULTS.csv\n",
+  "  THREE_FOLD_MEDIATION_COMPLETE_OBJECTS.rds\n\n"
+)
+
+
+# ============================================================
+# 26. FINAL INTERPRETATION REMINDER
+# ============================================================
+
+cat(
+  "IMPORTANT:\n",
+  "These mediation analyses are based on cross-sectional\n",
+  "expression/pathway scores and therefore provide evidence\n",
+  "consistent with potential mediation, not proof of a causal\n",
+  "biological sequence.\n"
+)
