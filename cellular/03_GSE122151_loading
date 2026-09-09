@@ -1,0 +1,354 @@
+# ============================================================
+# GSE122151 EXPERIMENT
+# STEP 3 — IMPORT AND INSPECT EXPRESSION DATA
+# ============================================================
+
+cat("\n============================================================\n")
+cat("GSE122151 — STEP 3: IMPORT EXPRESSION DATA\n")
+cat("============================================================\n\n")
+
+
+# ------------------------------------------------------------
+# 1. DEFINE THE RAW GSE122151 EXPRESSION FILE
+# ------------------------------------------------------------
+
+gse122151_expression_file <- file.path(
+  project_root,
+  "data",
+  "raw",
+  "GSE122151",
+  "GSE122151",
+  "GSE122151_Gene-fpkm-table.txt.gz"
+)
+
+
+# ------------------------------------------------------------
+# 2. VERIFY THAT THE FILE EXISTS
+# ------------------------------------------------------------
+
+if (!file.exists(gse122151_expression_file)) {
+
+  stop(
+    "GSE122151 expression file was not found:\n",
+    gse122151_expression_file
+  )
+
+}
+
+cat("Expression file found:\n")
+cat(gse122151_expression_file, "\n\n")
+
+
+# ------------------------------------------------------------
+# 3. READ THE FPKM TABLE
+# ------------------------------------------------------------
+# The file is compressed with gzip.
+# read.delim() can read the compressed file directly.
+
+gse122151_raw <- read.delim(
+  gse122151_expression_file,
+  header = TRUE,
+  sep = "\t",
+  quote = "",
+  comment.char = "",
+  check.names = FALSE,
+  stringsAsFactors = FALSE
+)
+
+
+# ------------------------------------------------------------
+# 4. BASIC STRUCTURAL AUDIT
+# ------------------------------------------------------------
+
+cat("============================================================\n")
+cat("RAW TABLE STRUCTURE\n")
+cat("============================================================\n\n")
+
+cat(
+  "Rows    :",
+  nrow(gse122151_raw),
+  "\n"
+)
+
+cat(
+  "Columns :",
+  ncol(gse122151_raw),
+  "\n\n"
+)
+
+cat("Column names:\n")
+print(colnames(gse122151_raw))
+
+
+# ------------------------------------------------------------
+# 5. DISPLAY FIRST ROWS
+# ------------------------------------------------------------
+
+cat("\n============================================================\n")
+cat("FIRST 6 ROWS\n")
+cat("============================================================\n\n")
+
+print(
+  head(gse122151_raw)
+)
+
+
+# ------------------------------------------------------------
+# 6. IDENTIFY THE GENE IDENTIFIER COLUMN
+# ------------------------------------------------------------
+# We do not assume its name.
+# The first column is inspected explicitly.
+
+gene_identifier_column <- colnames(gse122151_raw)[1]
+
+cat("\n============================================================\n")
+cat("GENE IDENTIFIER COLUMN\n")
+cat("============================================================\n\n")
+
+cat(
+  "First column:",
+  gene_identifier_column,
+  "\n\n"
+)
+
+cat("First 20 identifiers:\n")
+print(
+  head(
+    gse122151_raw[[gene_identifier_column]],
+    20
+  )
+)
+
+
+# ------------------------------------------------------------
+# 7. CHECK FOR DUPLICATE GENE IDENTIFIERS
+# ------------------------------------------------------------
+
+gene_ids <- as.character(
+  gse122151_raw[[gene_identifier_column]]
+)
+
+missing_gene_ids <- sum(
+  is.na(gene_ids) |
+    gene_ids == ""
+)
+
+duplicate_gene_ids <- sum(
+  duplicated(gene_ids)
+)
+
+unique_gene_ids <- length(
+  unique(gene_ids)
+)
+
+cat("\n============================================================\n")
+cat("GENE IDENTIFIER AUDIT\n")
+cat("============================================================\n\n")
+
+cat(
+  "Total rows:",
+  length(gene_ids),
+  "\n"
+)
+
+cat(
+  "Unique gene identifiers:",
+  unique_gene_ids,
+  "\n"
+)
+
+cat(
+  "Duplicate gene identifiers:",
+  duplicate_gene_ids,
+  "\n"
+)
+
+cat(
+  "Missing/blank gene identifiers:",
+  missing_gene_ids,
+  "\n"
+)
+
+
+# ------------------------------------------------------------
+# 8. IDENTIFY EXPRESSION COLUMNS
+# ------------------------------------------------------------
+# Everything except the gene identifier column is treated
+# as a candidate expression/sample column for inspection.
+#
+# No samples are selected or removed at this stage.
+
+expression_column_names <- colnames(gse122151_raw)[
+  colnames(gse122151_raw) != gene_identifier_column
+]
+
+cat("\n============================================================\n")
+cat("CANDIDATE SAMPLE COLUMNS\n")
+cat("============================================================\n\n")
+
+cat(
+  "Number of candidate expression columns:",
+  length(expression_column_names),
+  "\n\n"
+)
+
+print(expression_column_names)
+
+
+# ------------------------------------------------------------
+# 9. CHECK WHETHER EXPRESSION VALUES ARE NUMERIC
+# ------------------------------------------------------------
+
+expression_numeric_check <- vapply(
+  gse122151_raw[expression_column_names],
+  is.numeric,
+  logical(1)
+)
+
+cat("\n============================================================\n")
+cat("EXPRESSION COLUMN TYPE AUDIT\n")
+cat("============================================================\n\n")
+
+print(
+  data.frame(
+    sample = expression_column_names,
+    numeric = expression_numeric_check,
+    row.names = NULL,
+    stringsAsFactors = FALSE
+  )
+)
+
+
+# ------------------------------------------------------------
+# 10. BASIC EXPRESSION RANGE
+# ------------------------------------------------------------
+
+if (all(expression_numeric_check)) {
+
+  expression_values <- as.matrix(
+    gse122151_raw[expression_column_names]
+  )
+
+  cat("\n============================================================\n")
+  cat("RAW FPKM VALUE RANGE\n")
+  cat("============================================================\n\n")
+
+  cat(
+    "Minimum:",
+    min(expression_values, na.rm = TRUE),
+    "\n"
+  )
+
+  cat(
+    "Maximum:",
+    max(expression_values, na.rm = TRUE),
+    "\n"
+  )
+
+  cat(
+    "Number of NA values:",
+    sum(is.na(expression_values)),
+    "\n"
+  )
+
+  cat(
+    "Number of negative values:",
+    sum(expression_values < 0, na.rm = TRUE),
+    "\n"
+  )
+
+} else {
+
+  warning(
+    "One or more candidate expression columns are not numeric."
+  )
+
+}
+
+
+# ------------------------------------------------------------
+# 11. SAVE THE RAW IMPORTED OBJECT
+# ------------------------------------------------------------
+# This preserves exactly what was read from the supplied
+# GSE122151 expression file before any processing.
+
+saveRDS(
+  gse122151_raw,
+  file = file.path(
+    results_dir,
+    "03_GSE122151_raw_FPKM_table.rds"
+  )
+)
+
+
+# ------------------------------------------------------------
+# 12. SAVE IMPORT AUDIT
+# ------------------------------------------------------------
+
+gse122151_import_audit <- data.frame(
+  file = gse122151_expression_file,
+  n_rows = nrow(gse122151_raw),
+  n_columns = ncol(gse122151_raw),
+  gene_identifier_column = gene_identifier_column,
+  n_expression_columns = length(expression_column_names),
+  n_unique_gene_ids = unique_gene_ids,
+  n_duplicate_gene_ids = duplicate_gene_ids,
+  n_missing_gene_ids = missing_gene_ids,
+  all_expression_columns_numeric = all(expression_numeric_check),
+  min_raw_value = if (all(expression_numeric_check)) {
+    min(expression_values, na.rm = TRUE)
+  } else {
+    NA_real_
+  },
+  max_raw_value = if (all(expression_numeric_check)) {
+    max(expression_values, na.rm = TRUE)
+  } else {
+    NA_real_
+  },
+  n_na_values = if (all(expression_numeric_check)) {
+    sum(is.na(expression_values))
+  } else {
+    NA_integer_
+  },
+  n_negative_values = if (all(expression_numeric_check)) {
+    sum(expression_values < 0, na.rm = TRUE)
+  } else {
+    NA_integer_
+  },
+  stringsAsFactors = FALSE
+)
+
+write.csv(
+  gse122151_import_audit,
+  file = file.path(
+    results_dir,
+    "03_GSE122151_expression_import_audit.csv"
+  ),
+  row.names = FALSE
+)
+
+
+# ------------------------------------------------------------
+# 13. FINAL MESSAGE
+# ------------------------------------------------------------
+
+cat("\n============================================================\n")
+cat("STEP 3 COMPLETE\n")
+cat("============================================================\n\n")
+
+cat("The GSE122151 FPKM table has been imported successfully.\n")
+cat("No log transformation was performed.\n")
+cat("No genes were filtered.\n")
+cat("No duplicate genes were collapsed.\n")
+cat("No samples were removed.\n")
+cat("No group assignment was assumed.\n")
+cat("No GSVA was performed.\n\n")
+
+cat(
+  "The next step will determine the exact sample identities\n",
+  "and Control vs Lipid_Loaded assignment from the GSE122151\n",
+  "sample metadata, before constructing the final expression\n",
+  "matrix.\n"
+)
+
+cat("\n============================================================\n")
