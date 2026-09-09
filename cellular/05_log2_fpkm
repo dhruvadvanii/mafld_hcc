@@ -1,0 +1,338 @@
+# ============================================================
+# GSE122151 EXPERIMENT
+# STEP 6 — GENE IDENTIFIERS, DUPLICATES, AND TRANSFORMATION
+# ============================================================
+
+cat("\n============================================================\n")
+cat("GSE122151 — STEP 6: GENE PROCESSING AND TRANSFORMATION\n")
+cat("============================================================\n\n")
+
+
+# ------------------------------------------------------------
+# 1. CHECK REQUIRED INPUT OBJECTS
+# ------------------------------------------------------------
+
+if (!exists("gse122151_expression_raw", envir = .GlobalEnv)) {
+  stop("Object 'gse122151_expression_raw' does not exist.")
+}
+
+if (!exists("gse122151_gene_ids", envir = .GlobalEnv)) {
+  stop("Object 'gse122151_gene_ids' does not exist.")
+}
+
+if (!exists("gse122151_sample_metadata", envir = .GlobalEnv)) {
+  stop("Object 'gse122151_sample_metadata' does not exist.")
+}
+
+
+# ------------------------------------------------------------
+# 2. CONVERT EXPRESSION VALUES TO NUMERIC MATRIX
+# ------------------------------------------------------------
+
+gse122151_expression_numeric <- as.matrix(
+  gse122151_expression_raw
+)
+
+mode(gse122151_expression_numeric) <- "numeric"
+
+
+# ------------------------------------------------------------
+# 3. STANDARDIZE GENE SYMBOLS
+# ------------------------------------------------------------
+# The gene_name column is used as the gene identifier.
+#
+# Standardization:
+#   - convert to character
+#   - remove leading/trailing whitespace
+#   - remove completely blank identifiers
+#
+# Gene symbols are otherwise preserved.
+
+gse122151_gene_symbols <- trimws(
+  as.character(gse122151_gene_ids)
+)
+
+if (any(is.na(gse122151_gene_symbols))) {
+  stop("Missing gene symbols detected.")
+}
+
+if (any(gse122151_gene_symbols == "")) {
+  stop("Blank gene symbols detected.")
+}
+
+
+# ------------------------------------------------------------
+# 4. AUDIT DUPLICATE GENE SYMBOLS
+# ------------------------------------------------------------
+
+gene_frequency <- table(
+  gse122151_gene_symbols
+)
+
+duplicate_gene_symbols <- names(
+  gene_frequency[gene_frequency > 1]
+)
+
+cat("============================================================\n")
+cat("GENE IDENTIFIER AUDIT\n")
+cat("============================================================\n\n")
+
+cat(
+  "Total gene rows:",
+  length(gse122151_gene_symbols),
+  "\n"
+)
+
+cat(
+  "Unique gene symbols:",
+  length(unique(gse122151_gene_symbols)),
+  "\n"
+)
+
+cat(
+  "Gene symbols occurring more than once:",
+  length(duplicate_gene_symbols),
+  "\n"
+)
+
+
+# ------------------------------------------------------------
+# 5. COLLAPSE DUPLICATE GENE SYMBOLS
+# ------------------------------------------------------------
+# When multiple rows correspond to the same gene symbol,
+# their expression values are collapsed using the median
+# across duplicate rows for each sample.
+#
+# This preserves a single expression value per gene while
+# avoiding arbitrary selection of one transcript/row.
+
+if (length(duplicate_gene_symbols) > 0) {
+
+  unique_gene_symbols <- unique(
+    gse122151_gene_symbols
+  )
+
+  collapsed_expression <- matrix(
+    NA_real_,
+    nrow = length(unique_gene_symbols),
+    ncol = ncol(gse122151_expression_numeric),
+    dimnames = list(
+      unique_gene_symbols,
+      colnames(gse122151_expression_numeric)
+    )
+  )
+
+  for (i in seq_along(unique_gene_symbols)) {
+
+    current_gene <- unique_gene_symbols[i]
+
+    row_indices <- which(
+      gse122151_gene_symbols == current_gene
+    )
+
+    collapsed_expression[i, ] <- apply(
+      gse122151_expression_numeric[row_indices, , drop = FALSE],
+      2,
+      median,
+      na.rm = TRUE
+    )
+  }
+
+} else {
+
+  collapsed_expression <- gse122151_expression_numeric
+
+  rownames(collapsed_expression) <-
+    gse122151_gene_symbols
+}
+
+
+# ------------------------------------------------------------
+# 6. VERIFY ONE ROW PER GENE
+# ------------------------------------------------------------
+
+if (anyDuplicated(rownames(collapsed_expression)) > 0) {
+  stop(
+    "Duplicate gene symbols remain after collapsing."
+  )
+}
+
+
+# ------------------------------------------------------------
+# 7. APPLY log2(FPKM + 1)
+# ------------------------------------------------------------
+# This is the expression scale specified in the revised
+# GSE122151 methodology.
+
+if (any(!is.finite(collapsed_expression))) {
+  stop(
+    "Non-finite values detected before transformation."
+  )
+}
+
+if (any(collapsed_expression < 0, na.rm = TRUE)) {
+  stop(
+    "Negative FPKM values detected. FPKM values must be non-negative."
+  )
+}
+
+gse122151_expression_log2 <- log2(
+  collapsed_expression + 1
+)
+
+
+# ------------------------------------------------------------
+# 8. VERIFY TRANSFORMED MATRIX
+# ------------------------------------------------------------
+
+if (any(!is.finite(gse122151_expression_log2))) {
+  stop(
+    "Non-finite values detected after log2(FPKM + 1) transformation."
+  )
+}
+
+if (nrow(gse122151_expression_log2) == 0) {
+  stop(
+    "No genes remain after gene processing."
+  )
+}
+
+if (ncol(gse122151_expression_log2) != 6) {
+  stop(
+    "The transformed matrix does not contain exactly six samples."
+  )
+}
+
+
+# ------------------------------------------------------------
+# 9. CREATE GENE COLLAPSE AUDIT
+# ------------------------------------------------------------
+
+gse122151_gene_collapse_audit <- data.frame(
+  metric = c(
+    "Original gene rows",
+    "Unique gene symbols",
+    "Duplicate gene symbols",
+    "Final gene rows",
+    "Final samples"
+  ),
+  value = c(
+    length(gse122151_gene_symbols),
+    length(unique(gse122151_gene_symbols)),
+    length(duplicate_gene_symbols),
+    nrow(gse122151_expression_log2),
+    ncol(gse122151_expression_log2)
+  ),
+  stringsAsFactors = FALSE
+)
+
+
+# ------------------------------------------------------------
+# 10. SAVE DUPLICATE-GENE LIST
+# ------------------------------------------------------------
+
+duplicate_gene_table <- data.frame(
+  gene_symbol = duplicate_gene_symbols,
+  number_of_rows = as.integer(
+    gene_frequency[duplicate_gene_symbols]
+  ),
+  stringsAsFactors = FALSE
+)
+
+write.csv(
+  duplicate_gene_table,
+  file = file.path(
+    results_dir,
+    "06_duplicate_gene_symbols.csv"
+  ),
+  row.names = FALSE
+)
+
+
+# ------------------------------------------------------------
+# 11. SAVE AUDIT
+# ------------------------------------------------------------
+
+write.csv(
+  gse122151_gene_collapse_audit,
+  file = file.path(
+    results_dir,
+    "06_gene_collapse_audit.csv"
+  ),
+  row.names = FALSE
+)
+
+
+# ------------------------------------------------------------
+# 12. SAVE PROCESSED EXPRESSION MATRIX
+# ------------------------------------------------------------
+
+saveRDS(
+  gse122151_expression_log2,
+  file = file.path(
+    results_dir,
+    "06_GSE122151_expression_log2_FPKM_plus1.rds"
+  )
+)
+
+
+# ------------------------------------------------------------
+# 13. SAVE GENE SYMBOLS
+# ------------------------------------------------------------
+
+write.csv(
+  data.frame(
+    gene_symbol = rownames(gse122151_expression_log2),
+    stringsAsFactors = FALSE
+  ),
+  file = file.path(
+    results_dir,
+    "06_GSE122151_final_gene_symbols.csv"
+  ),
+  row.names = FALSE
+)
+
+
+# ------------------------------------------------------------
+# 14. PRINT FINAL SUMMARY
+# ------------------------------------------------------------
+
+cat("\n============================================================\n")
+cat("STEP 6 COMPLETE\n")
+cat("============================================================\n\n")
+
+cat(
+  "Original gene rows       :",
+  nrow(gse122151_expression_numeric),
+  "\n"
+)
+
+cat(
+  "Unique gene symbols      :",
+  length(unique(gse122151_gene_symbols)),
+  "\n"
+)
+
+cat(
+  "Duplicate gene symbols   :",
+  length(duplicate_gene_symbols),
+  "\n"
+)
+
+cat(
+  "Final gene rows          :",
+  nrow(gse122151_expression_log2),
+  "\n"
+)
+
+cat(
+  "Final samples            :",
+  ncol(gse122151_expression_log2),
+  "\n\n"
+)
+
+cat("Final expression scale: log2(FPKM + 1)\n")
+cat("Duplicate genes: collapsed using within-sample median\n")
+cat("Samples: unchanged\n")
+cat("Genes: no outcome-based filtering performed\n")
+cat("\n============================================================\n")
