@@ -1,0 +1,275 @@
+# ============================================================
+# STEP 10 — STATISTICAL COMPARISON OF GSVA SCORES
+#           CONTROL vs LIPID_LOADED
+# ============================================================
+
+# ------------------------------------------------------------
+# 1. Define sample groups
+# ------------------------------------------------------------
+
+control_samples <- c(
+  "HepaRG1_control_S7",
+  "HepaRG2_control_S10",
+  "HepaRG3_control_S11"
+)
+
+lipid_samples <- c(
+  "HepaRG5_FA_S12",
+  "HepaRG6_FA_S13",
+  "HepaRG7_FA_S14"
+)
+
+
+# ------------------------------------------------------------
+# 2. Check that all samples are present
+# ------------------------------------------------------------
+
+required_samples <- c(
+  control_samples,
+  lipid_samples
+)
+
+missing_samples <- setdiff(
+  required_samples,
+  names(gse122151_gsva_scores)
+)
+
+if (length(missing_samples) > 0) {
+  stop(
+    paste(
+      "The following samples are missing from the GSVA results:",
+      paste(missing_samples, collapse = ", ")
+    )
+  )
+}
+
+
+# ------------------------------------------------------------
+# 3. Calculate statistics for every pathway
+# ------------------------------------------------------------
+
+pathway_results <- lapply(
+  seq_len(nrow(gse122151_gsva_scores)),
+  function(i) {
+    
+    pathway_name <- gse122151_gsva_scores$pathway[i]
+    
+    control_values <- as.numeric(
+      gse122151_gsva_scores[i, control_samples]
+    )
+    
+    lipid_values <- as.numeric(
+      gse122151_gsva_scores[i, lipid_samples]
+    )
+    
+    
+    # Group means
+    control_mean <- mean(
+      control_values,
+      na.rm = TRUE
+    )
+    
+    lipid_mean <- mean(
+      lipid_values,
+      na.rm = TRUE
+    )
+    
+    
+    # Group standard deviations
+    control_sd <- sd(
+      control_values,
+      na.rm = TRUE
+    )
+    
+    lipid_sd <- sd(
+      lipid_values,
+      na.rm = TRUE
+    )
+    
+    
+    # Mean difference:
+    # Lipid_Loaded - Control
+    mean_difference <- lipid_mean - control_mean
+    
+    
+    # --------------------------------------------------------
+    # Wilcoxon rank-sum test
+    # --------------------------------------------------------
+    
+    wilcox_p <- wilcox.test(
+      control_values,
+      lipid_values,
+      exact = TRUE
+    )$p.value
+    
+    
+    # --------------------------------------------------------
+    # Cohen's d
+    # --------------------------------------------------------
+    
+    pooled_sd <- sqrt(
+      (
+        (length(control_values) - 1) * control_sd^2 +
+        (length(lipid_values) - 1) * lipid_sd^2
+      ) /
+      (
+        length(control_values) +
+        length(lipid_values) - 2
+      )
+    )
+    
+    if (pooled_sd == 0) {
+      cohens_d <- NA_real_
+    } else {
+      cohens_d <- mean_difference / pooled_sd
+    }
+    
+    
+    # --------------------------------------------------------
+    # Direction of change
+    # --------------------------------------------------------
+    
+    direction <- ifelse(
+      mean_difference > 0,
+      "Higher in Lipid_Loaded",
+      ifelse(
+        mean_difference < 0,
+        "Lower in Lipid_Loaded",
+        "No difference"
+      )
+    )
+    
+    
+    # --------------------------------------------------------
+    # Replicate consistency
+    # --------------------------------------------------------
+    
+    control_vs_lipid <- lipid_values - control_mean
+    
+    lipid_direction_consistency <- sum(
+      sign(lipid_values - control_mean) ==
+        sign(mean_difference)
+    )
+    
+    consistency <- paste0(
+      lipid_direction_consistency,
+      "/3 Lipid_Loaded replicates in direction of group difference"
+    )
+    
+    
+    data.frame(
+      pathway = pathway_name,
+      
+      Control_1 = control_values[1],
+      Control_2 = control_values[2],
+      Control_3 = control_values[3],
+      
+      Lipid_Loaded_1 = lipid_values[1],
+      Lipid_Loaded_2 = lipid_values[2],
+      Lipid_Loaded_3 = lipid_values[3],
+      
+      Control_mean = control_mean,
+      Control_SD = control_sd,
+      
+      Lipid_Loaded_mean = lipid_mean,
+      Lipid_Loaded_SD = lipid_sd,
+      
+      mean_difference = mean_difference,
+      
+      Cohens_d = cohens_d,
+      
+      Wilcoxon_p = wilcox_p,
+      
+      direction = direction,
+      
+      replicate_consistency = consistency,
+      
+      stringsAsFactors = FALSE
+    )
+  }
+)
+
+
+# ------------------------------------------------------------
+# 4. Combine all pathways
+# ------------------------------------------------------------
+
+gse122151_gsva_statistics <- do.call(
+  rbind,
+  pathway_results
+)
+
+
+# ------------------------------------------------------------
+# 5. Multiple-testing correction
+# ------------------------------------------------------------
+
+gse122151_gsva_statistics$FDR <- p.adjust(
+  gse122151_gsva_statistics$Wilcoxon_p,
+  method = "BH"
+)
+
+
+# ------------------------------------------------------------
+# 6. Order pathways by p-value
+# ------------------------------------------------------------
+
+gse122151_gsva_statistics <- gse122151_gsva_statistics[
+  order(
+    gse122151_gsva_statistics$Wilcoxon_p
+  ),
+]
+
+
+# ------------------------------------------------------------
+# 7. Display results
+# ------------------------------------------------------------
+
+print(
+  gse122151_gsva_statistics
+)
+
+
+# ------------------------------------------------------------
+# 8. Save results
+# ------------------------------------------------------------
+
+results_dir <- file.path(
+  project_root,
+  "results",
+  "GSE122151"
+)
+
+if (!dir.exists(results_dir)) {
+  dir.create(
+    results_dir,
+    recursive = TRUE
+  )
+}
+
+
+write.csv(
+  gse122151_gsva_statistics,
+  file.path(
+    results_dir,
+    "10_GSE122151_GSVA_Control_vs_Lipid_Loaded_statistics.csv"
+  ),
+  row.names = FALSE
+)
+
+
+saveRDS(
+  gse122151_gsva_statistics,
+  file.path(
+    results_dir,
+    "10_GSE122151_GSVA_Control_vs_Lipid_Loaded_statistics.rds"
+  )
+)
+
+
+cat(
+  "\nStep 10 completed.\n",
+  "Pathways tested:",
+  nrow(gse122151_gsva_statistics),
+  "\n"
+)
