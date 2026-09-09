@@ -1,0 +1,3266 @@
+# ============================================================
+# GSE102536 — CHRONIC LIPID EXPOSURE ANALYSIS
+# COMPLETE REPRODUCIBLE PIPELINE
+# ============================================================
+#
+# Dataset:
+#   GSE102536
+#
+# Biological model:
+#   Differentiated HepaRG cells
+#   16-day fatty-acid exposure
+#   150 uM stearic acid + 150 uM oleic acid
+#
+# Samples analyzed:
+#
+# Control:
+#   GSM2740230
+#   GSM2740242
+#   GSM2740254
+#
+# Fatty-acid treated:
+#   GSM2740233
+#   GSM2740245
+#   GSM2740257
+#
+# Excluded:
+#   B[a]P-treated samples
+#   Ethanol-treated samples
+#
+# Existing project objects reused:
+#   final_gene_sets
+#   gene_set_list
+#   dsb_gene_universe
+#
+# Analysis:
+#   1. GSE102536 import
+#   2. Sample selection
+#   3. Probe-to-gene mapping
+#   4. Gene-level expression matrix
+#   5. QC
+#   6. GSVA of all 17 pathways
+#   7. Pathway-level statistics
+#   8. 77-gene DSB/HR panel
+#   9. 12-gene DSB/HR signature
+#  10. Reproducibility outputs
+#
+# Important:
+#   GSE102536 is a chronic lipid-associated HepaRG model.
+#   It is NOT a direct replication of GSE122151 because:
+#     GSE122151 = 72 h OA:PA
+#     GSE102536 = 16 d OA:SA
+#
+# ============================================================
+
+
+# ------------------------------------------------------------
+# 1. PACKAGES
+# ------------------------------------------------------------
+
+required_packages <- c(
+  "GEOquery",
+  "limma",
+  "GSVA",
+  "BiocParallel",
+  "ggplot2",
+  "pheatmap"
+)
+
+for (pkg in required_packages) {
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    stop(
+      paste0(
+        "Required package '", pkg,
+        "' is not installed. Please install it before running this script."
+      )
+    )
+  }
+}
+
+suppressPackageStartupMessages({
+  library(GEOquery)
+  library(limma)
+  library(GSVA)
+  library(BiocParallel)
+  library(ggplot2)
+  library(pheatmap)
+})
+
+
+# ------------------------------------------------------------
+# 2. PROJECT ROOT
+# ------------------------------------------------------------
+
+project_root <- "C:/Users/Dhruv Advani/OneDrive/Desktop/AIIMS/Research/MAFLD_HCC_Pipeline"
+
+if (!dir.exists(project_root)) {
+  stop("Project root does not exist: ", project_root)
+}
+
+setwd(project_root)
+
+
+# ------------------------------------------------------------
+# 3. CREATE DEDICATED OUTPUT DIRECTORIES
+# ------------------------------------------------------------
+
+gse102536_result_dir <- file.path(
+  project_root,
+  "results",
+  "GSE102536"
+)
+
+gse102536_figure_dir <- file.path(
+  project_root,
+  "figures",
+  "GSE102536"
+)
+
+dir.create(
+  gse102536_result_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+dir.create(
+  gse102536_figure_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+
+# ------------------------------------------------------------
+# 4. VERIFY EXISTING REQUIRED OBJECTS
+# ------------------------------------------------------------
+
+required_existing_objects <- c(
+  "final_gene_sets",
+  "gene_set_list",
+  "dsb_gene_universe"
+)
+
+missing_objects <- required_existing_objects[
+  !vapply(
+    required_existing_objects,
+    exists,
+    logical(1),
+    inherits = TRUE
+  )
+]
+
+if (length(missing_objects) > 0) {
+  stop(
+    paste0(
+      "The following required existing objects are missing: ",
+      paste(missing_objects, collapse = ", "),
+      "\n\nLoad the workspace containing the existing GSE122151 ",
+      "analysis objects before running this script."
+    )
+  )
+}
+
+
+# ------------------------------------------------------------
+# 5. AUDIT EXISTING GENE-SET OBJECTS
+# ------------------------------------------------------------
+
+cat("\n============================================================\n")
+cat("AUDITING EXISTING GENE-SET OBJECTS\n")
+cat("============================================================\n")
+
+cat("\nNumber of final_gene_sets:",
+    length(final_gene_sets), "\n")
+
+cat("\nfinal_gene_sets names:\n")
+print(names(final_gene_sets))
+
+cat("\nNumber of gene_set_list pathways:",
+    length(gene_set_list), "\n")
+
+cat("\ngene_set_list names:\n")
+print(names(gene_set_list))
+
+cat("\nNumber of DSB/HR genes:",
+    length(dsb_gene_universe), "\n")
+
+
+# ------------------------------------------------------------
+# 6. DOWNLOAD / LOAD GSE102536
+# ------------------------------------------------------------
+
+cat("\n============================================================\n")
+cat("DOWNLOADING GSE102536\n")
+cat("============================================================\n")
+
+gse102536_raw_dir <- file.path(
+  project_root,
+  "data",
+  "raw",
+  "GSE102536"
+)
+
+dir.create(
+  gse102536_raw_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+gse102536_geo <- GEOquery::getGEO(
+  "GSE102536",
+  GSEMatrix = TRUE,
+  AnnotGPL = TRUE,
+  destdir = gse102536_raw_dir
+)
+
+if (!is.list(gse102536_geo)) {
+  gse102536_geo <- list(gse102536_geo)
+}
+
+cat(
+  "\nNumber of GEO expression objects returned:",
+  length(gse102536_geo),
+  "\n"
+)
+
+
+# ------------------------------------------------------------
+# 7. IDENTIFY GPL21185 OBJECT
+# ------------------------------------------------------------
+
+platform_ids <- vapply(
+  gse102536_geo,
+  function(x) {
+    annotation(x)
+  },
+  character(1)
+)
+
+cat("\nPlatforms detected:\n")
+print(platform_ids)
+
+gpl_index <- which(
+  platform_ids == "GPL21185"
+)
+
+if (length(gpl_index) != 1) {
+  stop(
+    "Could not uniquely identify the GPL21185 GSE102536 expression object."
+  )
+}
+
+gse102536_eset <- gse102536_geo[[gpl_index]]
+
+cat(
+  "\nSelected platform:",
+  annotation(gse102536_eset),
+  "\n"
+)
+
+cat(
+  "Expression dimensions:",
+  nrow(exprs(gse102536_eset)),
+  "probes x",
+  ncol(exprs(gse102536_eset)),
+  "samples\n"
+)
+
+
+# ------------------------------------------------------------
+# 8. EXTRACT SAMPLE METADATA
+# ------------------------------------------------------------
+
+gse102536_pdata <- Biobase::pData(
+  gse102536_eset
+)
+
+cat("\nMetadata columns available:\n")
+print(
+  colnames(gse102536_pdata)
+)
+
+cat("\nSample titles:\n")
+print(
+  gse102536_pdata$title
+)
+
+
+# ------------------------------------------------------------
+# 9. DEFINE THE SIX SAMPLES OF INTEREST
+# ------------------------------------------------------------
+
+control_samples <- c(
+  "GSM2740230",
+  "GSM2740242",
+  "GSM2740254"
+)
+
+fatty_acid_samples <- c(
+  "GSM2740233",
+  "GSM2740245",
+  "GSM2740257"
+)
+
+selected_samples <- c(
+  control_samples,
+  fatty_acid_samples
+)
+
+available_samples <-
+  colnames(gse102536_eset)
+
+missing_selected_samples <-
+  setdiff(
+    selected_samples,
+    available_samples
+  )
+
+if (length(missing_selected_samples) > 0) {
+  stop(
+    paste0(
+      "The following required GSE102536 samples were not found:\n",
+      paste(
+        missing_selected_samples,
+        collapse = "\n"
+      )
+    )
+  )
+}
+
+
+# ------------------------------------------------------------
+# 10. CREATE SAMPLE METADATA
+# ------------------------------------------------------------
+
+gse102536_metadata <- data.frame(
+  sample_id = selected_samples,
+
+  group = c(
+    rep(
+      "Control",
+      length(control_samples)
+    ),
+    rep(
+      "Lipid_Loaded",
+      length(fatty_acid_samples)
+    )
+  ),
+
+  exposure_duration =
+    rep(
+      "16_days",
+      length(selected_samples)
+    ),
+
+  fatty_acid = c(
+    rep(
+      "None",
+      length(control_samples)
+    ),
+
+    rep(
+      "Stearic_Acid_150uM_Oleic_Acid_150uM",
+      length(fatty_acid_samples)
+    )
+  ),
+
+  stringsAsFactors = FALSE
+)
+
+rownames(gse102536_metadata) <-
+  gse102536_metadata$sample_id
+
+cat("\nSelected samples:\n")
+print(
+  gse102536_metadata
+)
+
+
+# ------------------------------------------------------------
+# 11. VERIFY SELECTED SAMPLE METADATA AGAINST GEO
+# ------------------------------------------------------------
+
+metadata_check <-
+  gse102536_pdata[
+    selected_samples,
+    ,
+    drop = FALSE
+  ]
+
+write.csv(
+  metadata_check,
+
+  file = file.path(
+    gse102536_result_dir,
+    "01_GSE102536_selected_samples_GEO_metadata.csv"
+  ),
+
+  row.names = TRUE
+)
+
+write.csv(
+  gse102536_metadata,
+
+  file = file.path(
+    gse102536_result_dir,
+    "01_GSE102536_analysis_metadata.csv"
+  ),
+
+  row.names = TRUE
+)
+
+
+# ------------------------------------------------------------
+# 12. EXTRACT PROCESSED GEO EXPRESSION MATRIX
+# ------------------------------------------------------------
+
+gse102536_probe_expression <-
+  exprs(
+    gse102536_eset
+  )[
+    ,
+    selected_samples,
+    drop = FALSE
+  ]
+
+cat(
+  "\nSelected probe-level expression dimensions:",
+  nrow(gse102536_probe_expression),
+  "x",
+  ncol(gse102536_probe_expression),
+  "\n"
+)
+
+if (
+  any(
+    !is.finite(
+      gse102536_probe_expression
+    )
+  )
+) {
+  stop(
+    "Non-finite values detected in GSE102536 expression matrix."
+  )
+}
+
+
+# ------------------------------------------------------------
+# 13. SAVE RAW SELECTED PROBE-LEVEL MATRIX
+# ------------------------------------------------------------
+
+write.csv(
+  gse102536_probe_expression,
+
+  file = file.path(
+    gse102536_result_dir,
+    "02_GSE102536_selected_probe_expression.csv"
+  ),
+
+  row.names = TRUE
+)
+
+
+# ------------------------------------------------------------
+# 14. DETERMINE PROBE-TO-GENE ANNOTATION
+# ------------------------------------------------------------
+
+gse102536_fdata <-
+  Biobase::fData(
+    gse102536_eset
+  )
+
+cat(
+  "\nPlatform annotation dimensions:",
+  nrow(gse102536_fdata),
+  "x",
+  ncol(gse102536_fdata),
+  "\n"
+)
+
+cat("\nAnnotation columns:\n")
+print(
+  colnames(gse102536_fdata)
+)
+
+
+gene_symbol_candidates <- c(
+  "Gene Symbol",
+  "Gene.Symbol",
+  "GENE_SYMBOL",
+  "GeneSymbol",
+  "Symbol",
+  "SYMBOL",
+  "gene_symbol",
+  "gene.symbol",
+  "gene_assignment"
+)
+
+gene_symbol_col <-
+  gene_symbol_candidates[
+    gene_symbol_candidates %in%
+      colnames(gse102536_fdata)
+  ][1]
+
+if (is.na(gene_symbol_col)) {
+
+  normalized_annotation_names <-
+    tolower(
+      gsub(
+        "[^a-z0-9]",
+        "",
+        colnames(gse102536_fdata)
+      )
+    )
+
+  candidate_normalized <- c(
+    "genesymbol",
+    "symbol",
+    "genesymbols",
+    "genesymbol"
+  )
+
+  matched_idx <-
+    which(
+      normalized_annotation_names %in%
+        candidate_normalized
+    )
+
+  if (length(matched_idx) > 0) {
+
+    gene_symbol_col <-
+      colnames(
+        gse102536_fdata
+      )[matched_idx[1]]
+  }
+}
+
+if (
+  is.na(gene_symbol_col) ||
+  length(gene_symbol_col) == 0
+) {
+
+  stop(
+    paste0(
+      "Could not identify a gene-symbol annotation column.\n",
+      "Please inspect the annotation columns printed above."
+    )
+  )
+}
+
+cat(
+  "\nGene-symbol annotation column selected:",
+  gene_symbol_col,
+  "\n"
+)
+
+
+# ------------------------------------------------------------
+# 15. STANDARDIZE GENE SYMBOLS
+# ------------------------------------------------------------
+
+gene_symbols_raw <-
+  as.character(
+    gse102536_fdata[
+      rownames(
+        gse102536_probe_expression
+      ),
+      gene_symbol_col
+    ]
+  )
+
+gene_symbols_raw <-
+  trimws(
+    gene_symbols_raw
+  )
+
+
+gene_symbols_clean <-
+  vapply(
+
+    strsplit(
+      gene_symbols_raw,
+      split = "///|//|;|\\|"
+    ),
+
+    function(x) {
+
+      x <- trimws(x)
+
+      x <- x[
+        x != ""
+      ]
+
+      if (
+        length(x) == 0
+      ) {
+
+        return(
+          NA_character_
+        )
+      }
+
+      x[1]
+    },
+
+    character(1)
+  )
+
+
+gene_symbols_clean <-
+  toupper(
+    gene_symbols_clean
+  )
+
+
+gene_symbols_clean[
+  gene_symbols_clean %in%
+    c(
+      "",
+      "---",
+      "NA",
+      "N/A",
+      "NULL"
+    )
+] <- NA_character_
+
+
+# ------------------------------------------------------------
+# 16. REMOVE UNMAPPED PROBES
+# ------------------------------------------------------------
+
+mapped_mask <-
+  !is.na(
+    gene_symbols_clean
+  ) &
+  gene_symbols_clean != ""
+
+cat("\nProbe mapping:\n")
+
+cat(
+  "Total probes:",
+  length(gene_symbols_clean),
+  "\n"
+)
+
+cat(
+  "Mapped probes:",
+  sum(mapped_mask),
+  "\n"
+)
+
+cat(
+  "Unmapped probes:",
+  sum(!mapped_mask),
+  "\n"
+)
+
+
+gse102536_probe_expression_mapped <-
+  gse102536_probe_expression[
+    mapped_mask,
+    ,
+    drop = FALSE
+  ]
+
+gene_symbols_mapped <-
+  gene_symbols_clean[
+    mapped_mask
+  ]
+
+rownames(
+  gse102536_probe_expression_mapped
+) <-
+  gene_symbols_mapped
+
+
+# ------------------------------------------------------------
+# 17. COLLAPSE MULTIPLE PROBES PER GENE
+# ------------------------------------------------------------
+
+collapse_probes_by_median <- function(
+    expression_matrix
+) {
+
+  gene_ids <-
+    rownames(
+      expression_matrix
+    )
+
+  unique_genes <-
+    unique(
+      gene_ids
+    )
+
+  collapsed <-
+    matrix(
+      NA_real_,
+
+      nrow =
+        length(
+          unique_genes
+        ),
+
+      ncol =
+        ncol(
+          expression_matrix
+        ),
+
+      dimnames =
+        list(
+          unique_genes,
+
+          colnames(
+            expression_matrix
+          )
+        )
+    )
+
+  for (
+    i in seq_along(
+      unique_genes
+    )
+  ) {
+
+    gene <-
+      unique_genes[i]
+
+    rows <-
+      which(
+        gene_ids == gene
+      )
+
+    if (
+      length(rows) == 1
+    ) {
+
+      collapsed[i, ] <-
+        expression_matrix[
+          rows,
+        ]
+
+    } else {
+
+      collapsed[i, ] <-
+        apply(
+
+          expression_matrix[
+            rows,
+            ,
+            drop = FALSE
+          ],
+
+          2,
+
+          median,
+
+          na.rm = TRUE
+        )
+    }
+  }
+
+  collapsed
+}
+
+
+gse102536_expression <-
+  collapse_probes_by_median(
+    gse102536_probe_expression_mapped
+  )
+
+
+# ------------------------------------------------------------
+# 18. FINAL EXPRESSION QC
+# ------------------------------------------------------------
+
+if (
+  anyDuplicated(
+    rownames(
+      gse102536_expression
+    )
+  ) > 0
+) {
+
+  stop(
+    "Duplicate gene names remain after probe collapse."
+  )
+}
+
+
+if (
+  any(
+    !is.finite(
+      gse102536_expression
+    )
+  )
+) {
+
+  stop(
+    "Non-finite values remain after probe collapse."
+  )
+}
+
+
+if (
+  !identical(
+    colnames(
+      gse102536_expression
+    ),
+    selected_samples
+  )
+) {
+
+  stop(
+    "Sample order mismatch after preprocessing."
+  )
+}
+
+
+cat(
+  "\nFinal gene-level expression dimensions:",
+  nrow(gse102536_expression),
+  "genes x",
+  ncol(gse102536_expression),
+  "samples\n"
+)
+
+
+# ------------------------------------------------------------
+# 19. SAVE PROCESSED EXPRESSION
+# ------------------------------------------------------------
+
+saveRDS(
+  gse102536_expression,
+
+  file = file.path(
+    gse102536_result_dir,
+    "02_GSE102536_gene_level_expression.rds"
+  )
+)
+
+write.csv(
+  gse102536_expression,
+
+  file = file.path(
+    gse102536_result_dir,
+    "02_GSE102536_gene_level_expression.csv"
+  ),
+
+  row.names = TRUE
+)
+
+
+# ------------------------------------------------------------
+# 20. QC — EXPRESSION DISTRIBUTIONS
+# ------------------------------------------------------------
+
+pdf(
+  file = file.path(
+    gse102536_figure_dir,
+    "03_GSE102536_expression_distributions.pdf"
+  ),
+
+  width = 10,
+
+  height = 6
+)
+
+boxplot(
+  gse102536_expression,
+
+  las = 2,
+
+  main =
+    "GSE102536 Gene-level Expression",
+
+  ylab =
+    "GEO processed expression signal"
+)
+
+dev.off()
+
+
+# ------------------------------------------------------------
+# 21. QC — SAMPLE CORRELATION
+# ------------------------------------------------------------
+
+gse102536_cor <-
+  cor(
+    gse102536_expression,
+    method = "pearson"
+  )
+
+write.csv(
+  gse102536_cor,
+
+  file = file.path(
+    gse102536_result_dir,
+    "03_GSE102536_sample_Pearson_correlation.csv"
+  ),
+
+  row.names = TRUE
+)
+
+
+pdf(
+  file = file.path(
+    gse102536_figure_dir,
+    "03_GSE102536_sample_correlation_heatmap.pdf"
+  ),
+
+  width = 7,
+
+  height = 6
+)
+
+pheatmap(
+  gse102536_cor,
+
+  main =
+    "GSE102536 Sample Correlation"
+)
+
+dev.off()
+
+
+# ------------------------------------------------------------
+# 22. QC — PCA
+# ------------------------------------------------------------
+
+gse102536_pca <-
+  prcomp(
+    t(
+      gse102536_expression
+    ),
+    scale. = FALSE
+  )
+
+
+gse102536_pca_df <-
+  data.frame(
+
+    sample_id =
+      rownames(
+        gse102536_pca$x
+      ),
+
+    PC1 =
+      gse102536_pca$x[, 1],
+
+    PC2 =
+      gse102536_pca$x[, 2],
+
+    group =
+      gse102536_metadata[
+        rownames(
+          gse102536_pca$x
+        ),
+        "group"
+      ]
+  )
+
+
+write.csv(
+  gse102536_pca_df,
+
+  file = file.path(
+    gse102536_result_dir,
+    "03_GSE102536_PCA_coordinates.csv"
+  ),
+
+  row.names = FALSE
+)
+
+
+pca_plot <- ggplot(
+  gse102536_pca_df,
+
+  aes(
+    x = PC1,
+    y = PC2,
+    label = sample_id,
+    shape = group
+  )
+) +
+
+  geom_point(
+    size = 4
+  ) +
+
+  geom_text(
+    vjust = -1,
+    size = 3
+  ) +
+
+  theme_bw() +
+
+  labs(
+    title =
+      "GSE102536 PCA",
+
+    x = "PC1",
+
+    y = "PC2"
+  )
+
+
+ggsave(
+  filename = file.path(
+    gse102536_figure_dir,
+    "03_GSE102536_PCA.pdf"
+  ),
+
+  plot = pca_plot,
+
+  width = 8,
+
+  height = 6
+)
+
+
+# ------------------------------------------------------------
+# 23. VERIFY FINAL_GENE_SETS STRUCTURE
+# ------------------------------------------------------------
+
+if (
+  !is.list(
+    final_gene_sets
+  )
+) {
+
+  stop(
+    "final_gene_sets is not a list."
+  )
+}
+
+
+if (
+  is.null(
+    names(
+      final_gene_sets
+    )
+  )
+) {
+
+  stop(
+    "final_gene_sets has no pathway names."
+  )
+}
+
+
+final_gene_sets <-
+  lapply(
+    final_gene_sets,
+
+    function(x) {
+
+      unique(
+        toupper(
+          trimws(
+            as.character(x)
+          )
+        )
+      )
+    }
+  )
+
+
+cat(
+  "\nPathway sizes:\n"
+)
+
+print(
+  sapply(
+    final_gene_sets,
+    length
+  )
+)
+
+
+# ============================================================
+# 24. GSVA — ALL 17 PATHWAYS
+# ============================================================
+
+cat(
+  "\n============================================================\n"
+)
+
+cat(
+  "STEP 24 — GSVA: ALL 17 PATHWAYS\n"
+)
+
+cat(
+  "============================================================\n"
+)
+
+
+# ------------------------------------------------------------
+# 24.1 CHECK PATHWAY COUNT
+# ------------------------------------------------------------
+
+if (
+  length(
+    final_gene_sets
+  ) != 17
+) {
+
+  stop(
+    "Expected 17 pathways, but found ",
+    length(
+      final_gene_sets
+    ),
+    "."
+  )
+}
+
+
+cat(
+  "Number of pathways:",
+  length(
+    final_gene_sets
+  ),
+  "\n"
+)
+
+
+# ------------------------------------------------------------
+# 24.2 PATHWAY GENE-SET COVERAGE
+# ------------------------------------------------------------
+
+gse102536_gene_universe <-
+  rownames(
+    gse102536_expression
+  )
+
+
+gse102536_pathway_coverage <-
+  data.frame(
+
+    pathway =
+      names(
+        final_gene_sets
+      ),
+
+    total_genes =
+      sapply(
+        final_gene_sets,
+        length
+      ),
+
+    genes_present =
+      sapply(
+
+        final_gene_sets,
+
+        function(gs) {
+
+          sum(
+            gs %in%
+              gse102536_gene_universe
+          )
+        }
+      ),
+
+    stringsAsFactors = FALSE
+  )
+
+
+gse102536_pathway_coverage$coverage_fraction <-
+  gse102536_pathway_coverage$genes_present /
+  gse102536_pathway_coverage$total_genes
+
+
+write.csv(
+
+  gse102536_pathway_coverage,
+
+  file = file.path(
+    gse102536_result_dir,
+    "04_GSE102536_pathway_gene_set_coverage.csv"
+  ),
+
+  row.names = FALSE
+)
+
+
+cat(
+  "\nPathway coverage:\n"
+)
+
+print(
+  gse102536_pathway_coverage
+)
+
+
+# ------------------------------------------------------------
+# 24.3 PREPARE EXPRESSION MATRIX
+# ------------------------------------------------------------
+
+gse102536_expression <-
+  as.matrix(
+    gse102536_expression
+  )
+
+storage.mode(
+  gse102536_expression
+) <- "numeric"
+
+
+# ------------------------------------------------------------
+# 24.4 CREATE NEW GSVA PARAMETER OBJECT
+# ------------------------------------------------------------
+#
+# IMPORTANT:
+#
+# The installed GSVA version uses the new parameter-object API.
+#
+# Therefore DO NOT use:
+#
+#   GSVA::gsva(
+#       expression,
+#       gene_sets,
+#       method = "gsva"
+#   )
+#
+# Instead use:
+#
+#   gsvaParam()
+#   followed by gsva()
+#
+# ------------------------------------------------------------
+
+gse102536_gsva_param <-
+  GSVA::gsvaParam(
+
+    exprData =
+      gse102536_expression,
+
+    geneSets =
+      final_gene_sets,
+
+    kcdf =
+      "Gaussian"
+  )
+
+
+# ------------------------------------------------------------
+# 24.5 RUN GSVA
+# ------------------------------------------------------------
+
+gse102536_gsva_result <-
+  GSVA::gsva(
+
+    gse102536_gsva_param,
+
+    verbose = TRUE
+  )
+
+
+# ------------------------------------------------------------
+# 24.6 EXTRACT GSVA SCORE MATRIX
+# ------------------------------------------------------------
+
+if (
+  inherits(
+    gse102536_gsva_result,
+    "matrix"
+  )
+) {
+
+  gse102536_gsva_scores <-
+    as.matrix(
+      gse102536_gsva_result
+    )
+
+} else {
+
+  gse102536_gsva_scores <-
+    as.matrix(
+
+      SummarizedExperiment::assay(
+        gse102536_gsva_result
+      )
+    )
+}
+
+
+# ------------------------------------------------------------
+# 24.7 VERIFY GSVA RESULT
+# ------------------------------------------------------------
+
+cat(
+  "\nGSVA dimensions:\n"
+)
+
+cat(
+  "Pathways:",
+  nrow(
+    gse102536_gsva_scores
+  ),
+  "\n"
+)
+
+cat(
+  "Samples:",
+  ncol(
+    gse102536_gsva_scores
+  ),
+  "\n"
+)
+
+
+if (
+  nrow(
+    gse102536_gsva_scores
+  ) !=
+  length(
+    final_gene_sets
+  )
+) {
+
+  stop(
+    "GSVA returned an unexpected number of pathways."
+  )
+}
+
+
+if (
+  ncol(
+    gse102536_gsva_scores
+  ) !=
+  ncol(
+    gse102536_expression
+  )
+) {
+
+  stop(
+    "GSVA returned an unexpected number of samples."
+  )
+}
+
+
+if (
+  any(
+    !is.finite(
+      gse102536_gsva_scores
+    )
+  )
+) {
+
+  stop(
+    "Non-finite values detected in GSVA scores."
+  )
+}
+
+
+if (
+  !identical(
+
+    colnames(
+      gse102536_gsva_scores
+    ),
+
+    colnames(
+      gse102536_expression
+    )
+  )
+) {
+
+  stop(
+    "GSVA sample order does not match expression matrix."
+  )
+}
+
+
+# ------------------------------------------------------------
+# 24.8 SAVE GSVA RESULTS
+# ------------------------------------------------------------
+
+write.csv(
+
+  gse102536_gsva_scores,
+
+  file = file.path(
+    gse102536_result_dir,
+    "05_GSE102536_GSVA_all_17_pathways.csv"
+  ),
+
+  row.names = TRUE
+)
+
+
+saveRDS(
+
+  gse102536_gsva_scores,
+
+  file = file.path(
+    gse102536_result_dir,
+    "05_GSE102536_GSVA_all_17_pathways.rds"
+  )
+)
+
+
+saveRDS(
+
+  gse102536_gsva_param,
+
+  file = file.path(
+    gse102536_result_dir,
+    "05_GSE102536_GSVA_parameter_object.rds"
+  )
+)
+
+
+# ============================================================
+# 25. PATHWAY-LEVEL CONTROL VS LIPID-LOADED STATISTICS
+# ============================================================
+
+cat(
+  "\n============================================================\n"
+)
+
+cat(
+  "STEP 25 — PATHWAY-LEVEL STATISTICS\n"
+)
+
+cat(
+  "============================================================\n"
+)
+
+
+gse102536_control_ids <- c(
+  "GSM2740230",
+  "GSM2740242",
+  "GSM2740254"
+)
+
+
+gse102536_lipid_ids <- c(
+  "GSM2740233",
+  "GSM2740245",
+  "GSM2740257"
+)
+
+
+if (
+  !all(
+    gse102536_control_ids %in%
+      colnames(
+        gse102536_gsva_scores
+      )
+  )
+) {
+
+  stop(
+    "One or more GSE102536 control samples are missing."
+  )
+}
+
+
+if (
+  !all(
+    gse102536_lipid_ids %in%
+      colnames(
+        gse102536_gsva_scores
+      )
+  )
+) {
+
+  stop(
+    "One or more GSE102536 lipid-treated samples are missing."
+  )
+}
+
+
+gse102536_gsva_statistics <-
+  lapply(
+
+    rownames(
+      gse102536_gsva_scores
+    ),
+
+    function(pathway) {
+
+      control_values <-
+        as.numeric(
+
+          gse102536_gsva_scores[
+            pathway,
+            gse102536_control_ids
+          ]
+        )
+
+
+      lipid_values <-
+        as.numeric(
+
+          gse102536_gsva_scores[
+            pathway,
+            gse102536_lipid_ids
+          ]
+        )
+
+
+      mean_control <-
+        mean(
+          control_values
+        )
+
+
+      mean_lipid <-
+        mean(
+          lipid_values
+        )
+
+
+      sd_control <-
+        sd(
+          control_values
+        )
+
+
+      sd_lipid <-
+        sd(
+          lipid_values
+        )
+
+
+      pooled_sd <-
+        sqrt(
+
+          (
+
+            (
+              length(
+                control_values
+              ) - 1
+            ) *
+
+              sd_control^2
+
+            +
+
+            (
+              length(
+                lipid_values
+              ) - 1
+            ) *
+
+              sd_lipid^2
+
+          )
+
+          /
+
+          (
+
+            length(
+              control_values
+            )
+
+            +
+
+            length(
+              lipid_values
+            )
+
+            - 2
+
+          )
+        )
+
+
+      cohen_d <-
+        ifelse(
+
+          pooled_sd > 0,
+
+          (
+            mean_lipid -
+              mean_control
+          ) /
+
+            pooled_sd,
+
+          NA_real_
+        )
+
+
+      wilcox_p <-
+        suppressWarnings(
+
+          wilcox.test(
+
+            lipid_values,
+
+            control_values,
+
+            exact = TRUE
+
+          )$p.value
+        )
+
+
+      replicate_consistency <-
+        mean(
+          lipid_values >
+            control_values
+        )
+
+
+      data.frame(
+
+        pathway = pathway,
+
+        Control_1 =
+          control_values[1],
+
+        Control_2 =
+          control_values[2],
+
+        Control_3 =
+          control_values[3],
+
+        Lipid_Loaded_1 =
+          lipid_values[1],
+
+        Lipid_Loaded_2 =
+          lipid_values[2],
+
+        Lipid_Loaded_3 =
+          lipid_values[3],
+
+        Control_mean =
+          mean_control,
+
+        Control_SD =
+          sd_control,
+
+        Lipid_Loaded_mean =
+          mean_lipid,
+
+        Lipid_Loaded_SD =
+          sd_lipid,
+
+        mean_difference =
+          mean_lipid -
+          mean_control,
+
+        Cohen_d =
+          cohen_d,
+
+        Wilcoxon_p =
+          wilcox_p,
+
+        replicate_consistency =
+          replicate_consistency,
+
+        direction =
+          ifelse(
+
+            mean_lipid >
+              mean_control,
+
+            "Increased",
+
+            ifelse(
+
+              mean_lipid <
+                mean_control,
+
+              "Decreased",
+
+              "Unchanged"
+            )
+          ),
+
+        stringsAsFactors = FALSE
+      )
+    }
+  )
+
+
+gse102536_gsva_statistics <-
+  do.call(
+    rbind,
+    gse102536_gsva_statistics
+  )
+
+
+gse102536_gsva_statistics$FDR <-
+  p.adjust(
+
+    gse102536_gsva_statistics$Wilcoxon_p,
+
+    method = "BH"
+  )
+
+
+gse102536_gsva_statistics <-
+  gse102536_gsva_statistics[
+    order(
+      gse102536_gsva_statistics$Wilcoxon_p
+    ),
+    ,
+    drop = FALSE
+  ]
+
+
+write.csv(
+
+  gse102536_gsva_statistics,
+
+  file = file.path(
+    gse102536_result_dir,
+    "06_GSE102536_GSVA_Control_vs_Lipid_Loaded_statistics.csv"
+  ),
+
+  row.names = FALSE
+)
+
+
+# ============================================================
+# 26. GSVA HEATMAP
+# ============================================================
+
+cat(
+  "\n============================================================\n"
+)
+
+cat(
+  "STEP 26 — GSVA HEATMAP\n"
+)
+
+cat(
+  "============================================================\n"
+)
+
+
+gse102536_gsva_scaled <-
+  t(
+
+    scale(
+
+      t(
+        gse102536_gsva_scores
+      )
+    )
+  )
+
+
+pdf(
+
+  file = file.path(
+    gse102536_figure_dir,
+    "06_GSE102536_GSVA_all_17_pathways_heatmap.pdf"
+  ),
+
+  width = 10,
+
+  height = 9
+)
+
+
+pheatmap(
+
+  gse102536_gsva_scaled,
+
+  cluster_cols = TRUE,
+
+  cluster_rows = FALSE,
+
+  main =
+    "GSE102536 — GSVA of 17 Predefined Pathways",
+
+  fontsize_row = 8
+)
+
+
+dev.off()
+
+
+# ============================================================
+# 27. GSVA GROUP COMPARISON PLOT
+# ============================================================
+
+cat(
+  "\n============================================================\n"
+)
+
+cat(
+  "STEP 27 — GSVA GROUP COMPARISON PLOT\n"
+)
+
+cat(
+  "============================================================\n"
+)
+
+
+gse102536_gsva_long <-
+  do.call(
+
+    rbind,
+
+    lapply(
+
+      rownames(
+        gse102536_gsva_scores
+      ),
+
+      function(pathway) {
+
+        data.frame(
+
+          pathway = pathway,
+
+          sample_id =
+            colnames(
+              gse102536_gsva_scores
+            ),
+
+          GSVA_score =
+            as.numeric(
+
+              gse102536_gsva_scores[
+                pathway,
+              ]
+            ),
+
+          group =
+            gse102536_metadata[
+              colnames(
+                gse102536_gsva_scores
+              ),
+              "group"
+            ),
+
+          stringsAsFactors = FALSE
+        )
+      }
+    )
+  )
+
+
+gse102536_gsva_long$pathway <-
+  factor(
+
+    gse102536_gsva_long$pathway,
+
+    levels =
+      rev(
+        rownames(
+          gse102536_gsva_scores
+        )
+      )
+  )
+
+
+gsva_plot <-
+  ggplot(
+
+    gse102536_gsva_long,
+
+    aes(
+      x = group,
+      y = GSVA_score
+    )
+  ) +
+
+  geom_boxplot(
+    outlier.shape = NA,
+    width = 0.6
+  ) +
+
+  geom_jitter(
+    width = 0.10,
+    size = 2.5
+  ) +
+
+  facet_wrap(
+    ~ pathway,
+    scales = "free_y",
+    ncol = 3
+  ) +
+
+  theme_bw() +
+
+  theme(
+
+    axis.text.x =
+      element_text(
+        angle = 45,
+        hjust = 1
+      ),
+
+    strip.text =
+      element_text(
+        size = 8
+      )
+  ) +
+
+  labs(
+
+    title =
+      "GSE102536 — 16-day Fatty-Acid Exposure",
+
+    x = NULL,
+
+    y = "GSVA score"
+  )
+
+
+ggsave(
+
+  filename = file.path(
+    gse102536_figure_dir,
+    "06_GSE102536_GSVA_Control_vs_Lipid_Loaded_all_17_pathways.pdf"
+  ),
+
+  plot = gsva_plot,
+
+  width = 12,
+
+  height = 12
+)
+
+
+# ============================================================
+# 28. 77-GENE DSB/HR PANEL
+# ============================================================
+
+cat(
+  "\n============================================================\n"
+)
+
+cat(
+  "STEP 28 — 77-GENE DSB/HR PANEL\n"
+)
+
+cat(
+  "============================================================\n"
+
+
+)
+
+
+dsb_members_gse102536 <-
+  intersect(
+
+    dsb_gene_universe,
+
+    rownames(
+      gse102536_expression
+    )
+  )
+
+
+dsb_absent_gse102536 <-
+  setdiff(
+
+    dsb_gene_universe,
+
+    rownames(
+      gse102536_expression
+    )
+  )
+
+
+cat(
+  "Total DSB/HR genes:",
+  length(
+    dsb_gene_universe
+  ),
+  "\n"
+)
+
+
+cat(
+  "Genes present:",
+  length(
+    dsb_members_gse102536
+  ),
+  "\n"
+)
+
+
+cat(
+  "Genes absent:",
+  length(
+    dsb_absent_gse102536
+  ),
+  "\n"
+)
+
+
+# ============================================================
+# 29. DSB/HR GENE-LEVEL STATISTICS
+# ============================================================
+
+cat(
+  "\n============================================================\n"
+)
+
+cat(
+  "STEP 29 — DSB/HR GENE-LEVEL STATISTICS\n"
+)
+
+cat(
+  "============================================================\n"
+)
+
+
+gse102536_dsb_gene_results <-
+  lapply(
+
+    dsb_members_gse102536,
+
+    function(gene) {
+
+      control_values <-
+        as.numeric(
+
+          gse102536_expression[
+            gene,
+            gse102536_control_ids
+          ]
+        )
+
+
+      lipid_values <-
+        as.numeric(
+
+          gse102536_expression[
+            gene,
+            gse102536_lipid_ids
+          ]
+        )
+
+
+      mean_control <-
+        mean(
+          control_values
+        )
+
+
+      mean_lipid <-
+        mean(
+          lipid_values
+        )
+
+
+      sd_control <-
+        sd(
+          control_values
+        )
+
+
+      sd_lipid <-
+        sd(
+          lipid_values
+        )
+
+
+      pooled_sd <-
+        sqrt(
+
+          (
+
+            (
+              length(
+                control_values
+              ) - 1
+            ) *
+
+              sd_control^2
+
+            +
+
+            (
+              length(
+                lipid_values
+              ) - 1
+            ) *
+
+              sd_lipid^2
+
+          )
+
+          /
+
+          (
+
+            length(
+              control_values
+            )
+
+            +
+
+            length(
+              lipid_values
+            )
+
+            - 2
+
+          )
+        )
+
+
+      cohen_d <-
+        ifelse(
+
+          pooled_sd > 0,
+
+          (
+            mean_lipid -
+              mean_control
+          ) /
+
+            pooled_sd,
+
+          NA_real_
+        )
+
+
+      p_value <-
+        suppressWarnings(
+
+          wilcox.test(
+
+            lipid_values,
+
+            control_values,
+
+            exact = TRUE
+
+          )$p.value
+        )
+
+
+      data.frame(
+
+        gene = gene,
+
+        Control_1 =
+          control_values[1],
+
+        Control_2 =
+          control_values[2],
+
+        Control_3 =
+          control_values[3],
+
+        Lipid_Loaded_1 =
+          lipid_values[1],
+
+        Lipid_Loaded_2 =
+          lipid_values[2],
+
+        Lipid_Loaded_3 =
+          lipid_values[3],
+
+        Control_mean =
+          mean_control,
+
+        Lipid_Loaded_mean =
+          mean_lipid,
+
+        mean_difference =
+          mean_lipid -
+          mean_control,
+
+        Control_SD =
+          sd_control,
+
+        Lipid_Loaded_SD =
+          sd_lipid,
+
+        Cohen_d =
+          cohen_d,
+
+        Wilcoxon_p =
+          p_value,
+
+        stringsAsFactors = FALSE
+      )
+    }
+  )
+
+
+gse102536_dsb_gene_results <-
+  do.call(
+
+    rbind,
+
+    gse102536_dsb_gene_results
+  )
+
+
+gse102536_dsb_gene_results$FDR <-
+  p.adjust(
+
+    gse102536_dsb_gene_results$Wilcoxon_p,
+
+    method = "BH"
+  )
+
+
+gse102536_dsb_gene_results$direction <-
+  ifelse(
+
+    gse102536_dsb_gene_results$mean_difference > 0,
+
+    "Increased",
+
+    ifelse(
+
+      gse102536_dsb_gene_results$mean_difference < 0,
+
+      "Decreased",
+
+      "Unchanged"
+    )
+  )
+
+
+gse102536_dsb_gene_results <-
+  gse102536_dsb_gene_results[
+    order(
+      gse102536_dsb_gene_results$Wilcoxon_p
+    ),
+    ,
+    drop = FALSE
+  ]
+
+
+write.csv(
+
+  gse102536_dsb_gene_results,
+
+  file = file.path(
+    gse102536_result_dir,
+    "07_GSE102536_DSB_HR_gene_expression_statistics.csv"
+  ),
+
+  row.names = FALSE
+)
+
+
+write.csv(
+
+  data.frame(
+    gene =
+      dsb_absent_gse102536
+  ),
+
+  file = file.path(
+    gse102536_result_dir,
+    "07_GSE102536_DSB_HR_genes_absent_from_expression.csv"
+  ),
+
+  row.names = FALSE
+)
+
+
+saveRDS(
+
+  gse102536_dsb_gene_results,
+
+  file = file.path(
+    gse102536_result_dir,
+    "07_GSE102536_DSB_HR_gene_expression_statistics.rds"
+  )
+)
+
+
+# ============================================================
+# 30. DSB/HR HEATMAP
+# ============================================================
+
+cat(
+  "\n============================================================\n"
+)
+
+cat(
+  "STEP 30 — DSB/HR HEATMAP\n"
+)
+
+cat(
+  "============================================================\n"
+)
+
+
+if (
+  length(
+    dsb_members_gse102536
+  ) > 1
+) {
+
+  dsb_expression_matrix <-
+    gse102536_expression[
+      dsb_members_gse102536,
+      ,
+      drop = FALSE
+    ]
+
+
+  dsb_gene_sd <-
+    apply(
+
+      dsb_expression_matrix,
+
+      1,
+
+      sd
+    )
+
+
+  dsb_expression_matrix_for_heatmap <-
+    dsb_expression_matrix[
+      dsb_gene_sd > 0,
+      ,
+      drop = FALSE
+    ]
+
+
+  dsb_expression_scaled <-
+    t(
+
+      scale(
+
+        t(
+          dsb_expression_matrix_for_heatmap
+        )
+      )
+    )
+
+
+  pdf(
+
+    file = file.path(
+      gse102536_figure_dir,
+      "07_GSE102536_DSB_HR_gene_heatmap.pdf"
+    ),
+
+    width = 10,
+
+    height = 12
+  )
+
+
+  pheatmap(
+
+    dsb_expression_scaled,
+
+    cluster_rows = TRUE,
+
+    cluster_cols = TRUE,
+
+    main =
+      "GSE102536 — DSB/HR Gene Expression",
+
+    fontsize_row = 6
+  )
+
+
+  dev.off()
+
+
+  write.csv(
+
+    dsb_expression_matrix,
+
+    file = file.path(
+      gse102536_result_dir,
+      "07_GSE102536_DSB_HR_expression_matrix.csv"
+    ),
+
+    row.names = TRUE
+  )
+
+
+  write.csv(
+
+    dsb_expression_scaled,
+
+    file = file.path(
+      gse102536_result_dir,
+      "07_GSE102536_DSB_HR_expression_matrix_scaled.csv"
+    ),
+
+    row.names = TRUE
+  )
+}
+
+
+# ============================================================
+# 31. 12-GENE DSB/HR SIGNATURE
+# ============================================================
+
+cat(
+  "\n============================================================\n"
+)
+
+cat(
+  "STEP 31 — 12-GENE DSB/HR SIGNATURE\n"
+)
+
+cat(
+  "============================================================\n"
+)
+
+
+signature_genes <- c(
+
+  "BARD1",
+
+  "DCLRE1C",
+
+  "PIAS4",
+
+  "LIG1",
+
+  "XRCC6",
+
+  "TDP1",
+
+  "POLL",
+
+  "MDC1",
+
+  "RIF1",
+
+  "RPA1",
+
+  "TP53BP1",
+
+  "ATM"
+)
+
+
+signature_present <-
+  intersect(
+
+    signature_genes,
+
+    rownames(
+      gse102536_expression
+    )
+  )
+
+
+signature_absent <-
+  setdiff(
+
+    signature_genes,
+
+    rownames(
+      gse102536_expression
+    )
+  )
+
+
+cat(
+  "Signature genes:",
+  length(
+    signature_genes
+  ),
+  "\n"
+)
+
+
+cat(
+  "Present:",
+  length(
+    signature_present
+  ),
+  "\n"
+)
+
+
+cat(
+  "Absent:",
+  length(
+    signature_absent
+  ),
+  "\n"
+)
+
+
+if (
+  length(
+    signature_absent
+  ) > 0
+) {
+
+  write.csv(
+
+    data.frame(
+      gene =
+        signature_absent
+    ),
+
+    file = file.path(
+      gse102536_result_dir,
+      "08_GSE102536_12_gene_signature_absent_genes.csv"
+    ),
+
+    row.names = FALSE
+  )
+}
+
+
+# ============================================================
+# 32. 12-GENE SIGNATURE GENE-LEVEL RESULTS
+# ============================================================
+
+cat(
+  "\n============================================================\n"
+)
+
+cat(
+  "STEP 32 — SIGNATURE GENE-LEVEL ANALYSIS\n"
+)
+
+cat(
+  "============================================================\n"
+)
+
+
+gse102536_signature_gene_results <-
+  lapply(
+
+    signature_present,
+
+    function(gene) {
+
+      control_values <-
+        as.numeric(
+
+          gse102536_expression[
+            gene,
+            gse102536_control_ids
+          ]
+        )
+
+
+      lipid_values <-
+        as.numeric(
+
+          gse102536_expression[
+            gene,
+            gse102536_lipid_ids
+          ]
+        )
+
+
+      mean_control <-
+        mean(
+          control_values
+        )
+
+
+      mean_lipid <-
+        mean(
+          lipid_values
+        )
+
+
+      data.frame(
+
+        gene = gene,
+
+        Control_1 =
+          control_values[1],
+
+        Control_2 =
+          control_values[2],
+
+        Control_3 =
+          control_values[3],
+
+        Lipid_Loaded_1 =
+          lipid_values[1],
+
+        Lipid_Loaded_2 =
+          lipid_values[2],
+
+        Lipid_Loaded_3 =
+          lipid_values[3],
+
+        Control_mean =
+          mean_control,
+
+        Lipid_Loaded_mean =
+          mean_lipid,
+
+        mean_difference =
+          mean_lipid -
+          mean_control,
+
+        Wilcoxon_p =
+          suppressWarnings(
+
+            wilcox.test(
+
+              lipid_values,
+
+              control_values,
+
+              exact = TRUE
+
+            )$p.value
+          ),
+
+        stringsAsFactors = FALSE
+      )
+    }
+  )
+
+
+if (
+  length(
+    gse102536_signature_gene_results
+  ) > 0
+) {
+
+  gse102536_signature_gene_results <-
+    do.call(
+
+      rbind,
+
+      gse102536_signature_gene_results
+    )
+
+} else {
+
+  gse102536_signature_gene_results <-
+    data.frame()
+}
+
+
+if (
+  nrow(
+    gse102536_signature_gene_results
+  ) > 0
+) {
+
+  gse102536_signature_gene_results$FDR <-
+    p.adjust(
+
+      gse102536_signature_gene_results$Wilcoxon_p,
+
+      method = "BH"
+    )
+
+
+  gse102536_signature_gene_results$direction <-
+    ifelse(
+
+      gse102536_signature_gene_results$mean_difference > 0,
+
+      "Increased",
+
+      ifelse(
+
+        gse102536_signature_gene_results$mean_difference < 0,
+
+        "Decreased",
+
+        "Unchanged"
+      )
+    )
+}
+
+
+write.csv(
+
+  gse102536_signature_gene_results,
+
+  file = file.path(
+    gse102536_result_dir,
+    "08_GSE102536_12_gene_signature_gene_level_statistics.csv"
+  ),
+
+  row.names = FALSE
+)
+
+
+# ============================================================
+# 33. 12-GENE SIGNATURE SCORE
+# ============================================================
+
+cat(
+  "\n============================================================\n"
+)
+
+cat(
+  "STEP 33 — 12-GENE SIGNATURE SCORE\n"
+)
+
+cat(
+  "============================================================\n"
+)
+
+
+if (
+  length(
+    signature_present
+  ) < 2
+) {
+
+  stop(
+    "Fewer than 2 signature genes are present. ",
+    "A signature score cannot be calculated reliably."
+  )
+}
+
+
+signature_expression <-
+  gse102536_expression[
+    signature_present,
+    ,
+    drop = FALSE
+  ]
+
+
+signature_z <-
+  t(
+
+    scale(
+
+      t(
+        signature_expression
+      )
+    )
+  )
+
+
+gse102536_signature_scores <-
+  colMeans(
+
+    signature_z,
+
+    na.rm = TRUE
+  )
+
+
+gse102536_signature_scores_df <-
+  data.frame(
+
+    sample_id =
+      names(
+        gse102536_signature_scores
+      ),
+
+    group =
+      gse102536_metadata[
+        names(
+          gse102536_signature_scores
+        ),
+        "group"
+      ),
+
+    signature_score =
+      as.numeric(
+        gse102536_signature_scores
+      ),
+
+    stringsAsFactors = FALSE
+  )
+
+
+write.csv(
+
+  gse102536_signature_scores_df,
+
+  file = file.path(
+    gse102536_result_dir,
+    "08_GSE102536_12_gene_signature_scores.csv"
+  ),
+
+  row.names = FALSE
+)
+
+
+# ============================================================
+# 34. SIGNATURE GROUP SUMMARY
+# ============================================================
+
+cat(
+  "\n============================================================\n"
+)
+
+cat(
+  "STEP 34 — SIGNATURE SUMMARY\n"
+)
+
+cat(
+  "============================================================\n"
+)
+
+
+signature_control <-
+  gse102536_signature_scores[
+    gse102536_control_ids
+  ]
+
+
+signature_lipid <-
+  gse102536_signature_scores[
+    gse102536_lipid_ids
+  ]
+
+
+pooled_signature_sd <-
+  sqrt(
+
+    (
+
+      (
+        length(
+          signature_control
+        ) - 1
+      ) *
+
+        sd(
+          signature_control
+        )^2
+
+      +
+
+      (
+        length(
+          signature_lipid
+        ) - 1
+      ) *
+
+        sd(
+          signature_lipid
+        )^2
+
+    )
+
+    /
+
+    (
+
+      length(
+        signature_control
+      )
+
+      +
+
+      length(
+        signature_lipid
+      )
+
+      - 2
+    )
+  )
+
+
+gse102536_signature_summary <-
+  data.frame(
+
+    Control_mean =
+      mean(
+        signature_control
+      ),
+
+    Control_SD =
+      sd(
+        signature_control
+      ),
+
+    Lipid_Loaded_mean =
+      mean(
+        signature_lipid
+      ),
+
+    Lipid_Loaded_SD =
+      sd(
+        signature_lipid
+      ),
+
+    mean_difference =
+      mean(
+        signature_lipid
+      ) -
+
+      mean(
+        signature_control
+      ),
+
+    Cohen_d =
+      ifelse(
+
+        pooled_signature_sd > 0,
+
+        (
+
+          mean(
+            signature_lipid
+          ) -
+
+          mean(
+            signature_control
+          )
+
+        ) /
+
+          pooled_signature_sd,
+
+        NA_real_
+      ),
+
+    Wilcoxon_p =
+      suppressWarnings(
+
+        wilcox.test(
+
+          signature_lipid,
+
+          signature_control,
+
+          exact = TRUE
+
+        )$p.value
+      )
+  )
+
+
+write.csv(
+
+  gse102536_signature_summary,
+
+  file = file.path(
+    gse102536_result_dir,
+    "08_GSE102536_12_gene_signature_summary.csv"
+  ),
+
+  row.names = FALSE
+)
+
+
+# ============================================================
+# 35. SIGNATURE PLOT
+# ============================================================
+
+cat(
+  "\n============================================================\n"
+)
+
+cat(
+  "STEP 35 — SIGNATURE PLOT\n"
+)
+
+cat(
+  "============================================================\n"
+)
+
+
+signature_plot <-
+  ggplot(
+
+    gse102536_signature_scores_df,
+
+    aes(
+      x = group,
+      y = signature_score
+    )
+  ) +
+
+  geom_boxplot(
+
+    outlier.shape = NA,
+
+    width = 0.55
+  ) +
+
+  geom_jitter(
+
+    width = 0.10,
+
+    size = 3
+  ) +
+
+  theme_bw() +
+
+  labs(
+
+    title =
+      "GSE102536 — 12-gene DSB/HR Signature",
+
+    x = NULL,
+
+    y =
+      "Mean standardized signature expression"
+  )
+
+
+ggsave(
+
+  filename = file.path(
+    gse102536_figure_dir,
+    "08_GSE102536_12_gene_signature.pdf"
+  ),
+
+  plot = signature_plot,
+
+  width = 7,
+
+  height = 6
+)
+
+
+# ============================================================
+# 36. SAVE COMPLETE ANALYSIS WORKSPACE
+# ============================================================
+
+cat(
+  "\n============================================================\n"
+)
+
+cat(
+  "STEP 36 — SAVING COMPLETE WORKSPACE\n"
+)
+
+cat(
+  "============================================================\n"
+)
+
+
+save(
+
+  gse102536_geo,
+
+  gse102536_eset,
+
+  gse102536_pdata,
+
+  gse102536_metadata,
+
+  gse102536_probe_expression,
+
+  gse102536_expression,
+
+  gse102536_pathway_coverage,
+
+  gse102536_gsva_param,
+
+  gse102536_gsva_scores,
+
+  gse102536_gsva_statistics,
+
+  gse102536_dsb_gene_results,
+
+  gse102536_signature_gene_results,
+
+  gse102536_signature_scores,
+
+  gse102536_signature_summary,
+
+  file = file.path(
+
+    gse102536_result_dir,
+
+    "GSE102536_complete_analysis_workspace.RData"
+  )
+)
+
+
+# ============================================================
+# 37. SAVE SESSION INFORMATION
+# ============================================================
+
+writeLines(
+
+  capture.output(
+    sessionInfo()
+  ),
+
+  con = file.path(
+
+    gse102536_result_dir,
+
+    "GSE102536_sessionInfo.txt"
+  )
+)
+
+
+# ============================================================
+# 38. FINAL SUMMARY
+# ============================================================
+
+cat(
+  "\n\n============================================================\n"
+)
+
+cat(
+  "GSE102536 ANALYSIS COMPLETE\n"
+)
+
+cat(
+  "============================================================\n"
+)
+
+
+cat(
+  "\nDataset: GSE102536\n"
+)
+
+
+cat(
+  "Platform: ",
+  annotation(
+    gse102536_eset
+  ),
+  "\n",
+  sep = ""
+)
+
+
+cat(
+  "Exposure: 16 days\n"
+)
+
+
+cat(
+  "Fatty acids: 150 uM stearic acid + 150 uM oleic acid\n"
+)
+
+
+cat(
+  "\nSamples analyzed:\n"
+)
+
+
+cat(
+  "Control: ",
+  length(
+    control_samples
+  ),
+  "\n",
+  sep = ""
+)
+
+
+cat(
+  "Lipid-loaded: ",
+  length(
+    fatty_acid_samples
+  ),
+  "\n",
+  sep = ""
+)
+
+
+cat(
+  "\nExpression matrix:\n"
+)
+
+
+cat(
+  nrow(
+    gse102536_expression
+  ),
+
+  " genes x ",
+
+  ncol(
+    gse102536_expression
+  ),
+
+  " samples\n",
+
+  sep = ""
+)
+
+
+cat(
+  "\nPathways analyzed: ",
+  nrow(
+    gse102536_gsva_scores
+  ),
+  "\n",
+  sep = ""
+)
+
+
+cat(
+  "\nDSB/HR genes represented: ",
+  length(
+    dsb_members_gse102536
+  ),
+
+  " / ",
+
+  length(
+    dsb_gene_universe
+  ),
+
+  "\n",
+  sep = ""
+)
+
+
+cat(
+  "\n12-gene signature represented: ",
+  length(
+    signature_present
+  ),
+
+  " / ",
+
+  length(
+    signature_genes
+  ),
+
+  "\n",
+  sep = ""
+)
+
+
+cat(
+  "\nResults saved to:\n",
+
+  gse102536_result_dir,
+
+  "\n"
+)
+
+
+cat(
+  "\nFigures saved to:\n",
+
+  gse102536_figure_dir,
+
+  "\n"
+)
+
+
+cat(
+  "\n============================================================\n"
+)
+
+cat(
+  "INTERPRETATION NOTE\n"
+)
+
+cat(
+  "============================================================\n"
+)
+
+
+cat(
+  "GSE102536 represents chronic 16-day exposure to ",
+  "stearic + oleic acid,\n",
+  "whereas GSE122151 represents 72-h exposure to ",
+  "oleic + palmitic acid.\n",
+  "Therefore GSE102536 is a chronic lipid-associated ",
+  "HepaRG comparison,\n",
+  "not a direct replication of GSE122151.\n"
+)
+
+
+cat(
+  "\nAnalysis finished successfully.\n"
+)
