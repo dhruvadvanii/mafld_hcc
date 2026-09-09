@@ -1,0 +1,556 @@
+# ============================================================
+# GSE122151 EXPERIMENT
+# STEP 7 — EXPRESSION QUALITY CONTROL
+# ============================================================
+
+cat("\n============================================================\n")
+cat("GSE122151 — STEP 7: EXPRESSION QC\n")
+cat("============================================================\n\n")
+
+
+# ------------------------------------------------------------
+# 1. CHECK REQUIRED INPUTS
+# ------------------------------------------------------------
+
+if (!exists("gse122151_expression_log2", envir = .GlobalEnv)) {
+  stop(
+    "Object 'gse122151_expression_log2' does not exist. ",
+    "Run Step 6 first."
+  )
+}
+
+if (!exists("gse122151_sample_metadata", envir = .GlobalEnv)) {
+  stop(
+    "Object 'gse122151_sample_metadata' does not exist. ",
+    "Run Step 5 first."
+  )
+}
+
+
+# ------------------------------------------------------------
+# 2. LOAD REQUIRED PACKAGE
+# ------------------------------------------------------------
+
+if (!requireNamespace("ggplot2", quietly = TRUE)) {
+  stop(
+    "Package 'ggplot2' is required for Step 7. ",
+    "Install it with install.packages('ggplot2')."
+  )
+}
+
+library(ggplot2)
+
+
+# ------------------------------------------------------------
+# 3. VERIFY MATRIX AND METADATA
+# ------------------------------------------------------------
+
+expr <- as.matrix(
+  gse122151_expression_log2
+)
+
+metadata <- gse122151_sample_metadata
+
+if (!is.numeric(expr)) {
+  stop("The expression matrix is not numeric.")
+}
+
+if (any(!is.finite(expr))) {
+  stop("Non-finite values detected in the expression matrix.")
+}
+
+if (ncol(expr) != 6) {
+  stop(
+    "Expected 6 samples, found ",
+    ncol(expr),
+    "."
+  )
+}
+
+if (!identical(
+  colnames(expr),
+  rownames(metadata)
+)) {
+  stop(
+    "Expression matrix sample order does not match sample metadata."
+  )
+}
+
+
+# ------------------------------------------------------------
+# 4. REPORT SAMPLE INFORMATION
+# ------------------------------------------------------------
+
+cat("Samples:\n")
+print(colnames(expr))
+
+cat("\nGroups:\n")
+print(metadata$group)
+
+cat("\nGroup counts:\n")
+print(table(metadata$group))
+
+
+# ------------------------------------------------------------
+# 5. CREATE QC OUTPUT DIRECTORIES
+# ------------------------------------------------------------
+
+qc_dir <- file.path(
+  figures_dir,
+  "QC"
+)
+
+dir.create(
+  qc_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+
+# ------------------------------------------------------------
+# 6. EXPRESSION DISTRIBUTION — SAMPLE MEDIANS
+# ------------------------------------------------------------
+
+sample_summary <- data.frame(
+  sample = colnames(expr),
+  group = metadata[colnames(expr), "group"],
+  mean = colMeans(expr),
+  median = apply(expr, 2, median),
+  sd = apply(expr, 2, sd),
+  min = apply(expr, 2, min),
+  max = apply(expr, 2, max),
+  stringsAsFactors = FALSE
+)
+
+write.csv(
+  sample_summary,
+  file = file.path(
+    results_dir,
+    "07_sample_expression_summary.csv"
+  ),
+  row.names = FALSE
+)
+
+cat("\n============================================================\n")
+cat("SAMPLE EXPRESSION SUMMARY\n")
+cat("============================================================\n\n")
+
+print(sample_summary)
+
+
+# ------------------------------------------------------------
+# 7. EXPRESSION DISTRIBUTION PLOT
+# ------------------------------------------------------------
+# Each sample is shown separately.
+# This is a QC visualization only.
+
+distribution_data <- data.frame(
+  expression = as.vector(expr),
+  sample = rep(
+    colnames(expr),
+    each = nrow(expr)
+  )
+)
+
+distribution_data$sample <- factor(
+  distribution_data$sample,
+  levels = colnames(expr)
+)
+
+p_distribution <- ggplot(
+  distribution_data,
+  aes(
+    x = sample,
+    y = expression
+  )
+) +
+  geom_boxplot(
+    outlier.size = 0.2
+  ) +
+  labs(
+    title = "GSE122151 Expression Distribution",
+    x = "Sample",
+    y = "log2(FPKM + 1)"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(
+      angle = 45,
+      hjust = 1
+    )
+  )
+
+ggsave(
+  filename = file.path(
+    qc_dir,
+    "07_expression_distribution_boxplot.png"
+  ),
+  plot = p_distribution,
+  width = 9,
+  height = 6,
+  dpi = 300
+)
+
+
+# ------------------------------------------------------------
+# 8. PAIRWISE SAMPLE CORRELATION
+# ------------------------------------------------------------
+# Pearson correlation is calculated across genes.
+
+correlation_matrix <- cor(
+  expr,
+  method = "pearson",
+  use = "pairwise.complete.obs"
+)
+
+write.csv(
+  correlation_matrix,
+  file = file.path(
+    results_dir,
+    "07_pairwise_sample_correlation.csv"
+  ),
+  row.names = TRUE
+)
+
+cat("\n============================================================\n")
+cat("PAIRWISE SAMPLE CORRELATION\n")
+cat("============================================================\n\n")
+
+print(
+  round(
+    correlation_matrix,
+    4
+  )
+)
+
+
+# ------------------------------------------------------------
+# 9. CORRELATION HEATMAP
+# ------------------------------------------------------------
+
+correlation_data <- as.data.frame(
+  as.table(correlation_matrix)
+)
+
+colnames(correlation_data) <- c(
+  "Sample1",
+  "Sample2",
+  "Correlation"
+)
+
+p_correlation <- ggplot(
+  correlation_data,
+  aes(
+    x = Sample1,
+    y = Sample2,
+    fill = Correlation
+  )
+) +
+  geom_tile() +
+  geom_text(
+    aes(
+      label = sprintf(
+        "%.3f",
+        Correlation
+      )
+    ),
+    size = 4
+  ) +
+  scale_fill_gradient2(
+    limits = c(-1, 1),
+    midpoint = 0
+  ) +
+  labs(
+    title = "GSE122151 Pairwise Sample Correlation",
+    x = NULL,
+    y = NULL,
+    fill = "Pearson r"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(
+      angle = 45,
+      hjust = 1
+    )
+  )
+
+ggsave(
+  filename = file.path(
+    qc_dir,
+    "07_pairwise_sample_correlation_heatmap.png"
+  ),
+  plot = p_correlation,
+  width = 8,
+  height = 7,
+  dpi = 300
+)
+
+
+# ------------------------------------------------------------
+# 10. PCA
+# ------------------------------------------------------------
+# PCA is performed across samples using genes as variables.
+#
+# Expression matrix:
+#   rows    = genes
+#   columns = samples
+#
+# prcomp() requires:
+#   rows    = observations/samples
+#   columns = variables/genes
+
+pca_input <- t(expr)
+
+pca_result <- prcomp(
+  pca_input,
+  center = TRUE,
+  scale. = FALSE
+)
+
+pca_variance <- (
+  pca_result$sdev^2
+) / sum(
+  pca_result$sdev^2
+)
+
+pca_coordinates <- data.frame(
+  sample = rownames(pca_result$x),
+  PC1 = pca_result$x[, 1],
+  PC2 = pca_result$x[, 2],
+  group = metadata[
+    rownames(pca_result$x),
+    "group"
+  ],
+  stringsAsFactors = FALSE
+)
+
+write.csv(
+  pca_coordinates,
+  file = file.path(
+    results_dir,
+    "07_PCA_coordinates.csv"
+  ),
+  row.names = FALSE
+)
+
+write.csv(
+  data.frame(
+    PC = paste0(
+      "PC",
+      seq_along(pca_variance)
+    ),
+    variance_explained = pca_variance,
+    stringsAsFactors = FALSE
+  ),
+  file = file.path(
+    results_dir,
+    "07_PCA_variance_explained.csv"
+  ),
+  row.names = FALSE
+)
+
+cat("\n============================================================\n")
+cat("PCA VARIANCE EXPLAINED\n")
+cat("============================================================\n\n")
+
+print(
+  round(
+    pca_variance[1:min(6, length(pca_variance))] * 100,
+    2
+  )
+)
+
+
+# ------------------------------------------------------------
+# 11. PCA PLOT
+# ------------------------------------------------------------
+
+p_pca <- ggplot(
+  pca_coordinates,
+  aes(
+    x = PC1,
+    y = PC2,
+    label = sample,
+    shape = group
+  )
+) +
+  geom_point(
+    size = 4
+  ) +
+  geom_text(
+    vjust = -0.8,
+    size = 3
+  ) +
+  labs(
+    title = "GSE122151 Principal Component Analysis",
+    x = paste0(
+      "PC1 (",
+      round(pca_variance[1] * 100, 1),
+      "%)"
+    ),
+    y = paste0(
+      "PC2 (",
+      round(pca_variance[2] * 100, 1),
+      "%)"
+    ),
+    shape = "Group"
+  ) +
+  theme_bw()
+
+ggsave(
+  filename = file.path(
+    qc_dir,
+    "07_PCA.png"
+  ),
+  plot = p_pca,
+  width = 8,
+  height = 6,
+  dpi = 300
+)
+
+
+# ------------------------------------------------------------
+# 12. HIERARCHICAL CLUSTERING
+# ------------------------------------------------------------
+# Euclidean distance is calculated between samples using
+# their genome-wide expression profiles.
+
+sample_distance <- dist(
+  t(expr),
+  method = "euclidean"
+)
+
+hierarchical_clustering <- hclust(
+  sample_distance,
+  method = "complete"
+)
+
+saveRDS(
+  hierarchical_clustering,
+  file = file.path(
+    results_dir,
+    "07_hierarchical_clustering.rds"
+  )
+)
+
+write.csv(
+  as.matrix(sample_distance),
+  file = file.path(
+    results_dir,
+    "07_sample_euclidean_distance.csv"
+  ),
+  row.names = TRUE
+)
+
+
+# ------------------------------------------------------------
+# 13. SAVE HIERARCHICAL CLUSTERING FIGURE
+# ------------------------------------------------------------
+
+png(
+  filename = file.path(
+    qc_dir,
+    "07_hierarchical_clustering.png"
+  ),
+  width = 2400,
+  height = 1800,
+  res = 300
+)
+
+plot(
+  hierarchical_clustering,
+  main = "GSE122151 Hierarchical Clustering",
+  xlab = "",
+  sub = "",
+  ylab = "Euclidean distance",
+  cex = 0.9
+)
+
+dev.off()
+
+
+# ------------------------------------------------------------
+# 14. CREATE QC AUDIT TABLE
+# ------------------------------------------------------------
+
+qc_audit <- data.frame(
+  sample = colnames(expr),
+  group = metadata[colnames(expr), "group"],
+  mean_expression = colMeans(expr),
+  median_expression = apply(expr, 2, median),
+  sd_expression = apply(expr, 2, sd),
+  min_expression = apply(expr, 2, min),
+  max_expression = apply(expr, 2, max),
+  stringsAsFactors = FALSE
+)
+
+qc_audit$mean_pairwise_correlation <- vapply(
+  seq_len(ncol(expr)),
+  function(i) {
+    mean(
+      correlation_matrix[i, -i],
+      na.rm = TRUE
+    )
+  },
+  numeric(1)
+)
+
+write.csv(
+  qc_audit,
+  file = file.path(
+    results_dir,
+    "07_GSE122151_QC_audit.csv"
+  ),
+  row.names = FALSE
+)
+
+
+# ------------------------------------------------------------
+# 15. SAVE COMPLETE QC OBJECT
+# ------------------------------------------------------------
+
+gse122151_qc <- list(
+  sample_summary = sample_summary,
+  correlation_matrix = correlation_matrix,
+  pca_result = pca_result,
+  pca_coordinates = pca_coordinates,
+  pca_variance = pca_variance,
+  sample_distance = sample_distance,
+  hierarchical_clustering = hierarchical_clustering
+)
+
+saveRDS(
+  gse122151_qc,
+  file = file.path(
+    results_dir,
+    "07_GSE122151_QC_results.rds"
+  )
+)
+
+
+# ------------------------------------------------------------
+# 16. FINAL MESSAGE
+# ------------------------------------------------------------
+
+cat("\n============================================================\n")
+cat("STEP 7 COMPLETE\n")
+cat("============================================================\n\n")
+
+cat("QC performed:\n")
+cat("  [1] Expression distribution\n")
+cat("  [2] Pairwise sample correlation\n")
+cat("  [3] PCA\n")
+cat("  [4] Hierarchical clustering\n\n")
+
+cat("All six samples have been retained.\n")
+cat("No sample was removed based solely on clustering or PCA.\n")
+cat("No GSVA was performed.\n")
+cat("No differential analysis was performed.\n\n")
+
+cat(
+  "QC results saved under:\n",
+  qc_dir,
+  "\n"
+)
+
+cat("\n============================================================\n")
