@@ -1,0 +1,200 @@
+# ============================================================
+# STEP 11 — VISUALIZE GSVA SCORES
+#           CONTROL vs LIPID_LOADED
+# ============================================================
+
+library(ggplot2)
+
+# ------------------------------------------------------------
+# 1. Convert GSVA results to long format
+# ------------------------------------------------------------
+
+gsva_long <- rbind(
+  
+  data.frame(
+    pathway = gse122151_gsva_scores$pathway,
+    sample = "HepaRG1_control_S7",
+    group = "Control",
+    GSVA_score = gse122151_gsva_scores$HepaRG1_control_S7
+  ),
+  
+  data.frame(
+    pathway = gse122151_gsva_scores$pathway,
+    sample = "HepaRG2_control_S10",
+    group = "Control",
+    GSVA_score = gse122151_gsva_scores$HepaRG2_control_S10
+  ),
+  
+  data.frame(
+    pathway = gse122151_gsva_scores$pathway,
+    sample = "HepaRG3_control_S11",
+    group = "Control",
+    GSVA_score = gse122151_gsva_scores$HepaRG3_control_S11
+  ),
+  
+  data.frame(
+    pathway = gse122151_gsva_scores$pathway,
+    sample = "HepaRG5_FA_S12",
+    group = "Lipid_Loaded",
+    GSVA_score = gse122151_gsva_scores$HepaRG5_FA_S12
+  ),
+  
+  data.frame(
+    pathway = gse122151_gsva_scores$pathway,
+    sample = "HepaRG6_FA_S13",
+    group = "Lipid_Loaded",
+    GSVA_score = gse122151_gsva_scores$HepaRG6_FA_S13
+  ),
+  
+  data.frame(
+    pathway = gse122151_gsva_scores$pathway,
+    sample = "HepaRG7_FA_S14",
+    group = "Lipid_Loaded",
+    GSVA_score = gse122151_gsva_scores$HepaRG7_FA_S14
+  )
+)
+
+
+# ------------------------------------------------------------
+# 2. Order pathways according to GSVA group difference
+# ------------------------------------------------------------
+
+pathway_order <- gse122151_gsva_statistics$pathway[
+  order(
+    gse122151_gsva_statistics$mean_difference,
+    decreasing = TRUE
+  )
+]
+
+gsva_long$pathway <- factor(
+  gsva_long$pathway,
+  levels = pathway_order
+)
+
+
+# ------------------------------------------------------------
+# 3. Create plot
+# ------------------------------------------------------------
+
+gsva_plot <- ggplot(
+  gsva_long,
+  aes(
+    x = group,
+    y = GSVA_score
+  )
+) +
+  
+  geom_jitter(
+    width = 0.10,
+    size = 3
+  ) +
+  
+  stat_summary(
+    fun = mean,
+    geom = "point",
+    size = 4,
+    shape = 18
+  ) +
+  
+  stat_summary(
+    fun.data = mean_cl_normal,
+    geom = "errorbar",
+    width = 0.15
+  ) +
+  
+  facet_wrap(
+    ~ pathway,
+    scales = "free_y",
+    ncol = 4
+  ) +
+  
+  labs(
+    title = "GSVA Scores: Control vs Lipid-Loaded HepaRG",
+    x = NULL,
+    y = "GSVA score"
+  ) +
+  
+  theme_bw() +
+  
+  theme(
+    axis.text.x = element_text(
+      angle = 45,
+      hjust = 1
+    ),
+    strip.text = element_text(
+      size = 9
+    ),
+    plot.title = element_text(
+      face = "bold"
+    )
+  )
+
+
+# ------------------------------------------------------------
+# 4. Display plot
+# ------------------------------------------------------------
+
+print(gsva_plot)
+
+
+# ------------------------------------------------------------
+# 5. Save plot
+# ------------------------------------------------------------
+
+figures_dir <- file.path(
+  project_root,
+  "figures",
+  "GSE122151"
+)
+
+if (!dir.exists(figures_dir)) {
+  dir.create(
+    figures_dir,
+    recursive = TRUE
+  )
+}
+
+ggsave(
+  filename = file.path(
+    figures_dir,
+    "11_GSE122151_GSVA_Control_vs_Lipid_Loaded_all_17_pathways.png"
+  ),
+  plot = gsva_plot,
+  width = 16,
+  height = 12,
+  dpi = 300
+)
+
+
+# ------------------------------------------------------------
+# 6. Save long-format data
+# ------------------------------------------------------------
+
+results_dir <- file.path(
+  project_root,
+  "results",
+  "GSE122151"
+)
+
+write.csv(
+  gsva_long,
+  file.path(
+    results_dir,
+    "11_GSE122151_GSVA_long_format.csv"
+  ),
+  row.names = FALSE
+)
+
+
+saveRDS(
+  gsva_long,
+  file.path(
+    results_dir,
+    "11_GSE122151_GSVA_long_format.rds"
+  )
+)
+
+
+cat(
+  "\nStep 11 completed successfully.\n"
+)
