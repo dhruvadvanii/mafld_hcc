@@ -1,0 +1,381 @@
+# ============================================================
+# FIGURE 1C — DOUBLE-STRAND BREAK REPAIR
+# TCGA + GSE76427
+# ============================================================
+
+library(ggplot2)
+library(dplyr)
+
+# ------------------------------------------------------------
+# 1. TCGA DATA
+# ------------------------------------------------------------
+
+tcga_dsb <- data.frame(
+  Sample = colnames(tcga_pathway_scores),
+  DSB = as.numeric(
+    tcga_pathway_scores["DOUBLE_STRAND_BREAK_REPAIR", ]
+  )
+)
+
+# Match TCGA samples to lipid phenotype
+tcga_dsb$Lipid_Group <- as.character(
+  annotation_col[
+    match(
+      tcga_dsb$Sample,
+      rownames(annotation_col)
+    ),
+    "LipidGroup"
+  ]
+)
+
+tcga_dsb$Dataset <- "TCGA"
+
+
+# ------------------------------------------------------------
+# 2. GSE76427 DATA
+# ------------------------------------------------------------
+
+gse_dsb <- data.frame(
+  Sample = colnames(gse_pathway_scores),
+  DSB = as.numeric(
+    gse_pathway_scores["DOUBLE_STRAND_BREAK_REPAIR", ]
+  )
+)
+
+# Existing GSE76427 lipid grouping
+gse_dsb$Lipid_Group <- as.character(
+  gse12_lipid_group
+)
+
+gse_dsb$Dataset <- "GSE76427"
+
+
+# ------------------------------------------------------------
+# 3. STANDARDIZE GROUPS
+# ------------------------------------------------------------
+
+tcga_dsb$Lipid_Group <- factor(
+  tcga_dsb$Lipid_Group,
+  levels = c("Lipid-low", "Lipid-high")
+)
+
+gse_dsb$Lipid_Group <- factor(
+  gse_dsb$Lipid_Group,
+  levels = c("Lipid-low", "Lipid-high")
+)
+
+
+# ------------------------------------------------------------
+# 4. REMOVE MISSING VALUES
+# ------------------------------------------------------------
+
+tcga_dsb <- tcga_dsb[
+  !is.na(tcga_dsb$DSB) &
+  !is.na(tcga_dsb$Lipid_Group),
+]
+
+gse_dsb <- gse_dsb[
+  !is.na(gse_dsb$DSB) &
+  !is.na(gse_dsb$Lipid_Group),
+]
+
+
+# ------------------------------------------------------------
+# 5. COMBINE DATASETS
+# ------------------------------------------------------------
+
+dsb_plot_data <- bind_rows(
+  tcga_dsb,
+  gse_dsb
+)
+
+dsb_plot_data$Dataset <- factor(
+  dsb_plot_data$Dataset,
+  levels = c("TCGA", "GSE76427")
+)
+
+
+# ------------------------------------------------------------
+# 6. CREATE DISPLAY GROUPS
+# ------------------------------------------------------------
+
+dsb_plot_data$Group <- interaction(
+  dsb_plot_data$Dataset,
+  dsb_plot_data$Lipid_Group,
+  sep = " | ",
+  drop = TRUE
+)
+
+dsb_plot_data$Group <- factor(
+  dsb_plot_data$Group,
+  levels = c(
+    "TCGA | Lipid-low",
+    "TCGA | Lipid-high",
+    "GSE76427 | Lipid-low",
+    "GSE76427 | Lipid-high"
+  )
+)
+
+
+# ------------------------------------------------------------
+# 7. COLOURS
+# ------------------------------------------------------------
+
+dataset_cols <- c(
+  "TCGA" = "#3B6FB6",
+  "GSE76427" = "#D8893C"
+)
+
+
+# ------------------------------------------------------------
+# 8. Y-AXIS RANGE
+# ------------------------------------------------------------
+
+y_min <- min(
+  dsb_plot_data$DSB,
+  na.rm = TRUE
+)
+
+y_max <- max(
+  dsb_plot_data$DSB,
+  na.rm = TRUE
+)
+
+y_range <- y_max - y_min
+
+if (y_range == 0) {
+  y_range <- 1
+}
+
+tcga_bar_y <- y_max + 0.10 * y_range
+gse_bar_y  <- y_max + 0.23 * y_range
+
+
+# ------------------------------------------------------------
+# 9. CREATE FIGURE
+# ------------------------------------------------------------
+
+p_dsb <- ggplot(
+  dsb_plot_data,
+  aes(
+    x = Group,
+    y = DSB,
+    fill = Dataset
+  )
+) +
+
+  # Boxplots
+  geom_boxplot(
+    width = 0.62,
+    outlier.shape = NA,
+    linewidth = 0.55,
+    alpha = 0.78
+  ) +
+
+  # Individual observations
+  geom_jitter(
+    aes(color = Dataset),
+    width = 0.10,
+    size = 1.35,
+    alpha = 0.40
+  ) +
+
+  # Dataset colours
+  scale_fill_manual(
+    values = dataset_cols
+  ) +
+
+  scale_color_manual(
+    values = dataset_cols
+  ) +
+
+  # X-axis labels
+  scale_x_discrete(
+    labels = c(
+      "TCGA\nLipid-low",
+      "TCGA\nLipid-high",
+      "GSE76427\nLipid-low",
+      "GSE76427\nLipid-high"
+    )
+  ) +
+
+  # Labels
+  labs(
+    title = "Double-strand break repair",
+    x = NULL,
+    y = "GSVA enrichment score"
+  ) +
+
+  # ----------------------------------------------------------
+  # TCGA SIGNIFICANCE
+  # FDR = 1.81 × 10^-9
+  # ****
+  # ----------------------------------------------------------
+
+  annotate(
+    "segment",
+    x = 1,
+    xend = 2,
+    y = tcga_bar_y,
+    yend = tcga_bar_y,
+    linewidth = 0.45
+  ) +
+
+  annotate(
+    "segment",
+    x = 1,
+    xend = 1,
+    y = tcga_bar_y - 0.025 * y_range,
+    yend = tcga_bar_y,
+    linewidth = 0.45
+  ) +
+
+  annotate(
+    "segment",
+    x = 2,
+    xend = 2,
+    y = tcga_bar_y - 0.025 * y_range,
+    yend = tcga_bar_y,
+    linewidth = 0.45
+  ) +
+
+  annotate(
+    "text",
+    x = 1.5,
+    y = tcga_bar_y + 0.025 * y_range,
+    label = "****",
+    size = 4.5,
+    fontface = "bold"
+  ) +
+
+  # ----------------------------------------------------------
+  # GSE76427 SIGNIFICANCE
+  # FDR = 6.83 × 10^-3
+  # **
+  # ----------------------------------------------------------
+
+  annotate(
+    "segment",
+    x = 3,
+    xend = 4,
+    y = gse_bar_y,
+    yend = gse_bar_y,
+    linewidth = 0.45
+  ) +
+
+  annotate(
+    "segment",
+    x = 3,
+    xend = 3,
+    y = gse_bar_y - 0.025 * y_range,
+    yend = gse_bar_y,
+    linewidth = 0.45
+  ) +
+
+  annotate(
+    "segment",
+    x = 4,
+    xend = 4,
+    y = gse_bar_y - 0.025 * y_range,
+    yend = gse_bar_y,
+    linewidth = 0.45
+  ) +
+
+  annotate(
+    "text",
+    x = 3.5,
+    y = gse_bar_y + 0.025 * y_range,
+    label = "**",
+    size = 4.5,
+    fontface = "bold"
+  ) +
+
+  # ----------------------------------------------------------
+  # THEME
+  # ----------------------------------------------------------
+
+  theme_classic(
+    base_size = 11
+  ) +
+
+  theme(
+    plot.title = element_text(
+      hjust = 0.5,
+      face = "bold",
+      size = 13
+    ),
+
+    axis.title.y = element_text(
+      face = "bold",
+      size = 10.5
+    ),
+
+    axis.text.x = element_text(
+      size = 8.5,
+      colour = "black",
+      lineheight = 0.9
+    ),
+
+    axis.text.y = element_text(
+      colour = "black",
+      size = 9
+    ),
+
+    legend.position = "top",
+
+    legend.title = element_blank(),
+
+    legend.text = element_text(
+      size = 9
+    ),
+
+    axis.line = element_line(
+      linewidth = 0.5
+    ),
+
+    axis.ticks = element_line(
+      linewidth = 0.4
+    ),
+
+    plot.margin = margin(
+      12, 12, 12, 12
+    )
+  ) +
+
+  coord_cartesian(
+    ylim = c(
+      y_min,
+      gse_bar_y + 0.08 * y_range
+    ),
+    clip = "off"
+  )
+
+
+# ------------------------------------------------------------
+# 10. DISPLAY
+# ------------------------------------------------------------
+
+print(p_dsb)
+
+
+# ------------------------------------------------------------
+# 11. SAVE
+# ------------------------------------------------------------
+
+ggsave(
+  "Figure_1c_DSB_Repair_TCGAvsGSE76427.pdf",
+  p_dsb,
+  width = 6.5,
+  height = 4.5,
+  units = "in",
+  device = cairo_pdf
+)
+
+ggsave(
+  "Figure_1c_DSB_Repair_TCGAvsGSE76427.png",
+  p_dsb,
+  width = 6.5,
+  height = 4.5,
+  units = "in",
+  dpi = 600
+)
