@@ -248,6 +248,17 @@ p <- ggplot(
     linewidth = 0.6
   ) +
 
+  # Horizontal lines between pathways
+  geom_hline(
+    yintercept = seq(
+      1.5,
+      5.5,
+      by = 1
+    ),
+    colour = "grey90",
+    linewidth = 0.5
+  ) +
+
   # 95% confidence intervals
   geom_errorbarh(
     aes(
