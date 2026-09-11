@@ -1,0 +1,631 @@
+# ============================================================
+# FOREST PLOT
+# Lipid High vs Lipid Low
+# TCGA Discovery + GSE76427 Validation
+#
+# Six DDR pathways
+# TCGA = upper subrow
+# GSE76427 = lower subrow
+# ============================================================
+
+library(readxl)
+library(ggplot2)
+library(grid)
+
+
+# ============================================================
+# 1. FILE
+# ============================================================
+
+results_file <- "C:/Users/Dhruv Advani/OneDrive/Desktop/AIIMS/Research/MAFLD_HCC_Pipeline/results/Results.xlsx"
+
+
+# ============================================================
+# 2. READ DATA
+# ============================================================
+
+dat <- read_excel(
+  results_file,
+  sheet = "Human Samples_Lipid High vs Low"
+)
+
+dat <- as.data.frame(dat)
+
+
+# ============================================================
+# 3. KEEP THE SIX DDR PATHWAYS
+# ============================================================
+
+pathway_order <- c(
+  "Mismatch repair",
+  "Base excision repair",
+  "Hallmark DNA repair",
+  "Non-homologous end joining",
+  "Homologous recombination",
+  "Double-strand break repair"
+)
+
+dat <- dat[
+  dat$Pathway %in% pathway_order,
+  ,
+  drop = FALSE
+]
+
+
+# ============================================================
+# 4. ROBUST NUMERIC CONVERSION
+#
+# Excel contains Unicode minus signs (−) in some cells.
+# This converts them to ordinary "-" before numeric conversion.
+# ============================================================
+
+clean_numeric <- function(x) {
+
+  x <- as.character(x)
+
+  # Replace Unicode minus with ordinary minus
+  x <- gsub(
+    "\u2212",
+    "-",
+    x,
+    fixed = TRUE
+  )
+
+  # Remove spaces
+  x <- gsub(
+    " ",
+    "",
+    x,
+    fixed = TRUE
+  )
+
+  # Convert
+  suppressWarnings(
+    as.numeric(x)
+  )
+}
+
+
+# ============================================================
+# 5. CONVERT EFFECT SIZES AND FDR
+# ============================================================
+
+dat$TCGA_RB <- clean_numeric(
+  dat$`TCGA Rank-Biserial`
+)
+
+dat$GSE_RB <- clean_numeric(
+  dat$`GSE76427 Rank-Biserial`
+)
+
+dat$TCGA_FDR <- clean_numeric(
+  dat$`TCGA FDR`
+)
+
+dat$GSE_FDR <- clean_numeric(
+  dat$`GSE76427 FDR`
+)
+
+
+# ============================================================
+# 6. SAMPLE SIZES
+# ============================================================
+
+tcga_n_high <- 185
+tcga_n_low  <- 186
+
+gse_n_high <- 58
+gse_n_low  <- 57
+
+
+# ============================================================
+# 7. FUNCTION TO CALCULATE APPROXIMATE 95% CI
+#
+# Effect measure = rank-biserial correlation
+# Fisher-z approximation used for visualization.
+# ============================================================
+
+get_ci <- function(r, n_high, n_low) {
+
+  n <- n_high + n_low
+
+  if (is.na(r)) {
+
+    return(
+      c(
+        estimate = NA_real_,
+        lower = NA_real_,
+        upper = NA_real_
+      )
+    )
+  }
+
+  # Protect Fisher transformation
+  r_safe <- max(
+    min(
+      r,
+      0.999999
+    ),
+    -0.999999
+  )
+
+  z <- atanh(r_safe)
+
+  se <- 1 / sqrt(n - 3)
+
+  z_low <- z - 1.96 * se
+
+  z_high <- z + 1.96 * se
+
+  lower <- tanh(z_low)
+
+  upper <- tanh(z_high)
+
+  c(
+    estimate = r,
+    lower = lower,
+    upper = upper
+  )
+}
+
+
+# ============================================================
+# 8. TCGA FOREST DATA
+# ============================================================
+
+tcga_rows <- lapply(
+  seq_len(nrow(dat)),
+  function(i) {
+
+    ci <- get_ci(
+      r = dat$TCGA_RB[i],
+      n_high = tcga_n_high,
+      n_low = tcga_n_low
+    )
+
+    data.frame(
+      Pathway = dat$Pathway[i],
+      Cohort = "TCGA",
+      estimate = ci["estimate"],
+      lower = ci["lower"],
+      upper = ci["upper"],
+      FDR = dat$TCGA_FDR[i],
+      stringsAsFactors = FALSE
+    )
+  }
+)
+
+tcga_plot <- do.call(
+  rbind,
+  tcga_rows
+)
+
+
+# ============================================================
+# 9. GSE76427 FOREST DATA
+# ============================================================
+
+gse_rows <- lapply(
+  seq_len(nrow(dat)),
+  function(i) {
+
+    ci <- get_ci(
+      r = dat$GSE_RB[i],
+      n_high = gse_n_high,
+      n_low = gse_n_low
+    )
+
+    data.frame(
+      Pathway = dat$Pathway[i],
+      Cohort = "GSE76427",
+      estimate = ci["estimate"],
+      lower = ci["lower"],
+      upper = ci["upper"],
+      FDR = dat$GSE_FDR[i],
+      stringsAsFactors = FALSE
+    )
+  }
+)
+
+gse_plot <- do.call(
+  rbind,
+  gse_rows
+)
+
+
+# ============================================================
+# 10. COMBINE
+# ============================================================
+
+forest_dat <- rbind(
+  tcga_plot,
+  gse_plot
+)
+
+
+# ============================================================
+# 11. REMOVE ONLY COMPLETELY INVALID ROWS
+# ============================================================
+
+forest_dat <- forest_dat[
+  !is.na(forest_dat$estimate),
+  ,
+  drop = FALSE
+]
+
+
+# ============================================================
+# 12. PATHWAY ORDER
+# ============================================================
+
+forest_dat$Pathway <- factor(
+  forest_dat$Pathway,
+  levels = pathway_order
+)
+
+
+# ============================================================
+# 13. TWO SUBROWS PER PATHWAY
+#
+# TCGA = upper
+# GSE76427 = lower
+# ============================================================
+
+forest_dat$base_y <- match(
+  forest_dat$Pathway,
+  pathway_order
+)
+
+forest_dat$y <- forest_dat$base_y
+
+forest_dat$y[
+  forest_dat$Cohort == "TCGA"
+] <- forest_dat$base_y[
+  forest_dat$Cohort == "TCGA"
+] + 0.17
+
+forest_dat$y[
+  forest_dat$Cohort == "GSE76427"
+] <- forest_dat$base_y[
+  forest_dat$Cohort == "GSE76427"
+] - 0.17
+
+
+# ============================================================
+# 14. SIGNIFICANCE SYMBOLS
+# ============================================================
+
+forest_dat$significance <- ""
+
+forest_dat$significance[
+  !is.na(forest_dat$FDR) &
+    forest_dat$FDR < 0.001
+] <- "***"
+
+forest_dat$significance[
+  !is.na(forest_dat$FDR) &
+    forest_dat$FDR >= 0.001 &
+    forest_dat$FDR < 0.01
+] <- "**"
+
+forest_dat$significance[
+  !is.na(forest_dat$FDR) &
+    forest_dat$FDR >= 0.01 &
+    forest_dat$FDR < 0.05
+] <- "*"
+
+
+# ============================================================
+# 15. PRINT DATA TO VERIFY
+# ============================================================
+
+cat("\n============================================\n")
+cat("DATA USED IN FOREST PLOT\n")
+cat("============================================\n")
+
+print(
+  forest_dat[
+    order(
+      forest_dat$base_y,
+      forest_dat$Cohort
+    ),
+    c(
+      "Pathway",
+      "Cohort",
+      "estimate",
+      "lower",
+      "upper",
+      "FDR"
+    ),
+    drop = FALSE
+  ]
+)
+
+cat(
+  "\nNumber of plotted observations:",
+  nrow(forest_dat),
+  "\n"
+)
+
+
+# ============================================================
+# FINAL FOREST PLOT
+# TCGA LEFT | GSE76427 RIGHT
+# ============================================================
+
+# Ensure cohort order
+forest_dat$Cohort <- factor(
+  forest_dat$Cohort,
+  levels = c("TCGA", "GSE76427")
+)
+
+# Ensure pathway order
+forest_dat$Pathway <- factor(
+  forest_dat$Pathway,
+  levels = pathway_order
+)
+
+# Two subrows per pathway:
+# TCGA upper, GSE76427 lower
+forest_dat$base_y <- match(
+  forest_dat$Pathway,
+  pathway_order
+)
+
+forest_dat$y <- forest_dat$base_y
+
+forest_dat$y[
+  forest_dat$Cohort == "TCGA"
+] <- forest_dat$base_y[
+  forest_dat$Cohort == "TCGA"
+] + 0.17
+
+forest_dat$y[
+  forest_dat$Cohort == "GSE76427"
+] <- forest_dat$base_y[
+  forest_dat$Cohort == "GSE76427"
+] - 0.17
+
+
+# ============================================================
+# AUTOMATIC X-AXIS RANGE
+# ============================================================
+
+all_x <- c(
+  forest_dat$lower,
+  forest_dat$estimate,
+  forest_dat$upper
+)
+
+x_min <- min(
+  all_x,
+  na.rm = TRUE
+)
+
+x_max <- max(
+  all_x,
+  na.rm = TRUE
+)
+
+x_range <- x_max - x_min
+
+if (x_range == 0) {
+  x_range <- 1
+}
+
+padding <- 0.12 * x_range
+
+x_limits <- c(
+  x_min - padding,
+  x_max + padding
+)
+
+
+# ============================================================
+# FOREST PLOT
+# ============================================================
+
+forest_plot <- ggplot(
+  forest_dat,
+  aes(
+    x = estimate,
+    y = y,
+    colour = Cohort
+  )
+) +
+
+  # Confidence intervals
+  geom_segment(
+    aes(
+      x = lower,
+      xend = upper,
+      y = y,
+      yend = y
+    ),
+    linewidth = 0.9,
+    lineend = "round"
+  ) +
+
+  # Point estimates
+  geom_point(
+    size = 3.4,
+    shape = 16
+  ) +
+
+  # Null line
+  geom_vline(
+    xintercept = 0,
+    linetype = "dashed",
+    linewidth = 0.6,
+    colour = "grey50"
+  ) +
+
+  # Light separators between pathways
+  geom_hline(
+    yintercept = seq(
+      1.5,
+      length(pathway_order) - 0.5,
+      by = 1
+    ),
+    linewidth = 0.35,
+    colour = "grey88"
+  ) +
+
+  # Pathway axis
+  scale_y_continuous(
+    breaks = seq_along(pathway_order),
+    labels = pathway_order,
+    limits = c(
+      0.5,
+      length(pathway_order) + 0.5
+    ),
+    expand = c(0, 0)
+  ) +
+
+  # TCGA = blue, GSE76427 = orange
+  scale_colour_manual(
+    values = c(
+      "TCGA" = "#3B6FB6",
+      "GSE76427" = "#D97941"
+    ),
+    breaks = c(
+      "TCGA",
+      "GSE76427"
+    ),
+    labels = c(
+      "TCGA Discovery",
+      "GSE76427 Validation"
+    )
+  ) +
+
+  # Automatic x-axis
+  scale_x_continuous(
+    breaks = pretty(
+      x_limits,
+      n = 6
+    )
+  ) +
+
+  coord_cartesian(
+    xlim = x_limits,
+    clip = "off"
+  ) +
+
+  # Labels
+  labs(
+    title = "FA Metabolism-Associated DDR Differences",
+    x = "Rank-biserial correlation",
+    y = NULL,
+    colour = NULL
+  ) +
+
+  # Theme
+  theme_minimal(
+    base_family = "sans"
+  ) +
+
+  theme(
+
+    # Centred title
+    plot.title = element_text(
+      hjust = 0.5,
+      size = 15,
+      face = "bold",
+      colour = "black",
+      margin = margin(
+        b = 14
+      )
+    ),
+
+    # Pathway labels
+    axis.text.y = element_text(
+      size = 9,
+      colour = "black"
+    ),
+
+    # X-axis labels
+    axis.text.x = element_text(
+      size = 8.5,
+      colour = "black"
+    ),
+
+    # X-axis title
+    axis.title.x = element_text(
+      size = 9,
+      colour = "black",
+      margin = margin(
+        t = 8
+      )
+    ),
+
+    # Remove default gridlines
+    panel.grid = element_blank(),
+
+    # Legend
+    legend.position = "top",
+
+    legend.text = element_text(
+      size = 8.5
+    ),
+
+    # Figure margins
+    plot.margin = margin(
+      10,
+      20,
+      10,
+      10
+    )
+  )
+
+
+# ============================================================
+# DISPLAY
+# ============================================================
+
+print(forest_plot)
+
+
+# ============================================================
+# SAVE PDF
+# ============================================================
+
+ggsave(
+  filename = "Lipid_High_vs_Low_DDR_Forest_Plot.pdf",
+  plot = forest_plot,
+  width = 7.5,
+  height = 5.5,
+  units = "in",
+  device = cairo_pdf
+)
+
+
+# ============================================================
+# SAVE 600 DPI PNG
+# ============================================================
+
+ggsave(
+  filename = "Lipid_High_vs_Low_DDR_Forest_Plot.png",
+  plot = forest_plot,
+  width = 7.5,
+  height = 5.5,
+  units = "in",
+  dpi = 600,
+  bg = "white"
+)
+
+# ============================================================
+# 21. SAVE DATA USED FOR FIGURE
+# ============================================================
+
+write.csv(
+  forest_dat,
+  "Lipid_High_vs_Low_DDR_Forest_Plot_Data.csv",
+  row.names = FALSE
+)
+
+
+cat(
+  "\n============================================\n",
+  "FOREST PLOT COMPLETE\n",
+  "============================================\n"
+)
