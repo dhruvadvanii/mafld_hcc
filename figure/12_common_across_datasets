@@ -1,0 +1,288 @@
+# ============================================================
+# DSB GENES REPRESENTED IN >1 DATASET
+# Dataset order:
+# TCGA-LIHC → GSE76427 → GSE102536 → GSE122151
+# ============================================================
+
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+# ============================================================
+# 1. READ DSB ANALYSIS DATA
+# ============================================================
+
+file_path <- "Results.xlsx"
+
+dsb <- readxl::read_excel(
+  file_path,
+  sheet = "DSB_Analysis"
+)
+
+# ============================================================
+# 2. CREATE DIRECTION FOR EACH DATASET
+# ============================================================
+
+dsb <- dsb %>%
+  dplyr::mutate(
+
+    # TCGA-LIHC:
+    # Positive = positive logFC
+    # Negative = negative logFC
+    TCGA_LIHC = dplyr::case_when(
+      `TCGA logFC` > 0 ~ "Positive",
+      `TCGA logFC` < 0 ~ "Negative",
+      TRUE ~ "No change"
+    ),
+
+    # GSE76427:
+    # Direction based on Spearman correlation
+    GSE76427 = dplyr::case_when(
+      `GSE76427 Spearman rho` > 0 ~ "Positive",
+      `GSE76427 Spearman rho` < 0 ~ "Negative",
+      TRUE ~ "No change"
+    ),
+
+    # GSE102536:
+    # Direction based on Lipid-loaded minus Control
+    GSE102536 = dplyr::case_when(
+      `GSE102536 Mean Difference` > 0 ~ "Positive",
+      `GSE102536 Mean Difference` < 0 ~ "Negative",
+      TRUE ~ "No change"
+    ),
+
+    # GSE122151:
+    # Direction based on Lipid-loaded minus Control
+    GSE122151 = dplyr::case_when(
+      `GSE122151 Mean Difference` > 0 ~ "Positive",
+      `GSE122151 Mean Difference` < 0 ~ "Negative",
+      TRUE ~ "No change"
+    )
+  )
+
+# ============================================================
+# 3. DETERMINE WHETHER GENE IS REPRESENTED IN EACH DATASET
+# ============================================================
+
+dsb <- dsb %>%
+  dplyr::mutate(
+
+    present_TCGA =
+      !is.na(`TCGA logFC`),
+
+    present_GSE76427 =
+      !is.na(`GSE76427 Spearman rho`),
+
+    present_GSE102536 =
+      !is.na(`GSE102536 Mean Difference`),
+
+    present_GSE122151 =
+      !is.na(`GSE122151 Mean Difference`)
+  )
+
+# ============================================================
+# 4. COUNT NUMBER OF DATASETS REPRESENTING EACH GENE
+# ============================================================
+
+dsb <- dsb %>%
+  dplyr::mutate(
+
+    n_datasets =
+      rowSums(
+        cbind(
+          present_TCGA,
+          present_GSE76427,
+          present_GSE102536,
+          present_GSE122151
+        )
+      )
+  )
+
+# ============================================================
+# 5. KEEP ONLY GENES PRESENT IN MORE THAN ONE DATASET
+# ============================================================
+
+dsb_filtered <- dsb %>%
+  dplyr::filter(n_datasets > 1)
+
+# ============================================================
+# 6. CREATE LONG-FORMAT DATA
+# ============================================================
+
+plot_dat <- dsb_filtered %>%
+  dplyr::select(
+    Gene,
+    TCGA_LIHC,
+    GSE76427,
+    GSE102536,
+    GSE122151
+  ) %>%
+  tidyr::pivot_longer(
+    cols = c(
+      TCGA_LIHC,
+      GSE76427,
+      GSE102536,
+      GSE122151
+    ),
+    names_to = "Dataset",
+    values_to = "Direction"
+  )
+
+# ============================================================
+# 7. FORCE DATASET ORDER
+# ============================================================
+
+plot_dat$Dataset <- factor(
+  plot_dat$Dataset,
+  levels = c(
+    "TCGA_LIHC",
+    "GSE76427",
+    "GSE102536",
+    "GSE122151"
+  )
+)
+
+# ============================================================
+# 8. ORDER GENES
+# ============================================================
+
+gene_order <- dsb_filtered %>%
+  dplyr::arrange(
+    dplyr::desc(n_datasets),
+    Gene
+  ) %>%
+  dplyr::pull(Gene)
+
+plot_dat$Gene <- factor(
+  plot_dat$Gene,
+  levels = rev(gene_order)
+)
+
+# ============================================================
+# 9. PLOT
+# ============================================================
+
+p <- ggplot2::ggplot(
+  plot_dat,
+  ggplot2::aes(
+    x = Dataset,
+    y = Gene,
+    fill = Direction
+  )
+) +
+
+  ggplot2::geom_tile(
+    colour = "white",
+    linewidth = 0.5
+  ) +
+
+  ggplot2::scale_fill_manual(
+    values = c(
+      "Positive" = "#D73027",
+      "Negative" = "#2A9D8F",
+      "No change" = "grey85"
+    ),
+    name = "Direction"
+  ) +
+
+  ggplot2::scale_x_discrete(
+    labels = c(
+      "TCGA_LIHC" = "TCGA-LIHC",
+      "GSE76427" = "GSE76427",
+      "GSE102536" = "GSE102536",
+      "GSE122151" = "GSE122151"
+    )
+  ) +
+
+  ggplot2::labs(
+    title = "DSB Gene Directionality Across Datasets",
+    x = NULL,
+    y = NULL
+  ) +
+
+  ggplot2::theme_minimal(
+    base_family = "Helvetica"
+  ) +
+
+  ggplot2::theme(
+    panel.grid = ggplot2::element_blank(),
+
+    axis.text.x = ggplot2::element_text(
+      family = "Helvetica",
+      size = 11,
+      face = "bold"
+    ),
+
+    axis.text.y = ggplot2::element_text(
+      family = "Helvetica",
+      size = 8
+    ),
+
+    plot.title = ggplot2::element_text(
+      family = "Helvetica",
+      size = 15,
+      face = "bold",
+      hjust = 0.5
+    ),
+
+    legend.title = ggplot2::element_text(
+      family = "Helvetica",
+      size = 10
+    ),
+
+    legend.text = ggplot2::element_text(
+      family = "Helvetica",
+      size = 9
+    )
+  )
+
+print(p)
+
+# ============================================================
+# 10. SAVE FIGURE
+# ============================================================
+
+ggplot2::ggsave(
+  "DSB_gene_directionality_shared_genes.png",
+  p,
+  width = 8,
+  height = max(5, 0.22 * length(gene_order)),
+  dpi = 600,
+  bg = "white"
+)
+
+ggplot2::ggsave(
+  "DSB_gene_directionality_shared_genes.pdf",
+  p,
+  width = 8,
+  height = max(5, 0.22 * length(gene_order))
+)
+
+# ============================================================
+# 11. SAVE FILTERED DATA
+# ============================================================
+
+utils::write.csv(
+  dsb_filtered,
+  "DSB_genes_represented_in_more_than_one_dataset.csv",
+  row.names = FALSE
+)
+
+# ============================================================
+# 12. PRINT SUMMARY
+# ============================================================
+
+cat(
+  "\nTotal genes in original dataset:",
+  nrow(dsb),
+  "\nGenes represented in >1 dataset:",
+  nrow(dsb_filtered),
+  "\n"
+)
+
+print(
+  dsb_filtered %>%
+    dplyr::count(n_datasets) %>%
+    dplyr::arrange(dplyr::desc(n_datasets))
+)
