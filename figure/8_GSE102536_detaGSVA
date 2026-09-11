@@ -1,0 +1,781 @@
+# ============================================================
+# GSE102536 — Long-Term Lipid Exposure
+# DDR Changes in Long Term Lipid Exposure
+# ============================================================
+
+# Load data
+gsva_stats <- read.csv(
+  "C:/Users/Dhruv Advani/OneDrive/Desktop/AIIMS/Research/MAFLD_HCC_Pipeline/imp_results/06_GSE102536_GSVA_Control_vs_Lipid_Loaded_statistics.csv",
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+
+# ------------------------------------------------------------
+# Define pathway mapping
+# ------------------------------------------------------------
+
+pathway_map <- c(
+  "DOUBLE_STRAND_BREAK_REPAIR" = "DSB Repair",
+  "HOMOLOGOUS_RECOMBINATION" = "HR",
+  "NON_HOMOLOGOUS_END_JOINING" = "NHEJ",
+  "HALLMARK_DNA_REPAIR" = "DNA Repair",
+  "BASE_EXCISION_REPAIR" = "BER",
+  "MISMATCH_REPAIR" = "MMR"
+)
+
+# ------------------------------------------------------------
+# Extract the six DDR pathways
+# ------------------------------------------------------------
+
+pathway_names <- names(pathway_map)
+
+plot_dat <- gsva_stats[
+  gsva_stats$pathway %in% pathway_names,
+  ,
+  drop = FALSE
+]
+
+# ------------------------------------------------------------
+# Set desired pathway order
+# ------------------------------------------------------------
+
+plot_dat$Pathway <- pathway_map[
+  match(plot_dat$pathway, pathway_names)
+]
+
+plot_dat$Pathway <- factor(
+  plot_dat$Pathway,
+  levels = c(
+    "DSB Repair",
+    "HR",
+    "NHEJ",
+    "DNA Repair",
+    "BER",
+    "MMR"
+  )
+)
+
+plot_dat <- plot_dat[
+  order(plot_dat$Pathway),
+  ,
+  drop = FALSE
+]
+
+# ------------------------------------------------------------
+# Sample columns
+# ------------------------------------------------------------
+
+control_cols <- c(
+  "Control_1",
+  "Control_2",
+  "Control_3"
+)
+
+lipid_cols <- c(
+  "Lipid_Loaded_1",
+  "Lipid_Loaded_2",
+  "Lipid_Loaded_3"
+)
+
+# Check required columns
+required_cols <- c(
+  control_cols,
+  lipid_cols
+)
+
+missing_cols <- setdiff(
+  required_cols,
+  names(gsva_stats)
+)
+
+if (length(missing_cols) > 0) {
+  stop(
+    paste(
+      "Missing required columns:",
+      paste(missing_cols, collapse = ", ")
+    )
+  )
+}
+
+# ------------------------------------------------------------
+# Convert sample values to long format
+# ------------------------------------------------------------
+
+long_dat <- do.call(
+  rbind,
+  lapply(seq_len(nrow(plot_dat)), function(i) {
+
+    data.frame(
+      Pathway = as.character(plot_dat$Pathway[i]),
+
+      Sample = c(
+        "Control_1",
+        "Lipid_Loaded_1",
+        "Control_2",
+        "Lipid_Loaded_2",
+        "Control_3",
+        "Lipid_Loaded_3"
+      ),
+
+      Value = as.numeric(
+        c(
+          plot_dat[[control_cols[1]]][i],
+          plot_dat[[lipid_cols[1]]][i],
+          plot_dat[[control_cols[2]]][i],
+          plot_dat[[lipid_cols[2]]][i],
+          plot_dat[[control_cols[3]]][i],
+          plot_dat[[lipid_cols[3]]][i]
+        )
+      ),
+
+      Group = c(
+        "Control sample",
+        "Lipid-loaded sample",
+        "Control sample",
+        "Lipid-loaded sample",
+        "Control sample",
+        "Lipid-loaded sample"
+      ),
+
+      stringsAsFactors = FALSE
+    )
+  })
+)
+
+# ------------------------------------------------------------
+# Numeric pathway positions
+# ------------------------------------------------------------
+
+long_dat$Pathway <- factor(
+  long_dat$Pathway,
+  levels = c(
+    "DSB Repair",
+    "HR",
+    "NHEJ",
+    "DNA Repair",
+    "BER",
+    "MMR"
+  )
+)
+
+long_dat$Pathway_num <- as.numeric(
+  long_dat$Pathway
+)
+
+# ------------------------------------------------------------
+# Assign replicate subcolumns
+# ------------------------------------------------------------
+
+long_dat$Replicate <- match(
+  long_dat$Sample,
+  c(
+    "Control_1",
+    "Lipid_Loaded_1",
+    "Control_2",
+    "Lipid_Loaded_2",
+    "Control_3",
+    "Lipid_Loaded_3"
+  )
+)
+
+long_dat$Replicate <- ceiling(
+  long_dat$Replicate / 2
+)
+
+# ------------------------------------------------------------
+# Horizontal offsets for the three subcolumns
+# ------------------------------------------------------------
+
+subcolumn_offsets <- c(
+  -0.25,
+  0,
+  0.25
+)
+
+long_dat$x <- (
+  long_dat$Pathway_num +
+    subcolumn_offsets[long_dat$Replicate] +
+    ifelse(
+      long_dat$Group == "Control sample",
+      -0.045,
+      0.045
+    )
+)
+
+# ------------------------------------------------------------
+# Calculate group means
+# ------------------------------------------------------------
+
+group_means <- do.call(
+  rbind,
+  lapply(
+    seq_len(nrow(plot_dat)),
+    function(i) {
+
+      data.frame(
+        Pathway = as.character(plot_dat$Pathway[i]),
+
+        Group = c(
+          "Control mean",
+          "Lipid-loaded mean"
+        ),
+
+        Mean = c(
+          mean(
+            as.numeric(
+              plot_dat[i, control_cols]
+            ),
+            na.rm = TRUE
+          ),
+
+          mean(
+            as.numeric(
+              plot_dat[i, lipid_cols]
+            ),
+            na.rm = TRUE
+          )
+        ),
+
+        stringsAsFactors = FALSE
+      )
+    }
+  )
+)
+
+group_means$Pathway <- factor(
+  group_means$Pathway,
+  levels = c(
+    "DSB Repair",
+    "HR",
+    "NHEJ",
+    "DNA Repair",
+    "BER",
+    "MMR"
+  )
+)
+
+group_means$Pathway_num <- as.numeric(
+  group_means$Pathway
+)
+
+group_means$x <- group_means$Pathway_num
+
+# ------------------------------------------------------------
+# Dotted lines between mean diamonds
+# ------------------------------------------------------------
+
+mean_line_dat <- do.call(
+  rbind,
+  lapply(
+    seq_len(nrow(plot_dat)),
+    function(i) {
+
+      control_mean <- mean(
+        as.numeric(
+          plot_dat[i, control_cols]
+        ),
+        na.rm = TRUE
+      )
+
+      lipid_mean <- mean(
+        as.numeric(
+          plot_dat[i, lipid_cols]
+        ),
+        na.rm = TRUE
+      )
+
+      data.frame(
+        Pathway = as.character(
+          plot_dat$Pathway[i]
+        ),
+
+        x = i,
+        xend = i,
+
+        y = control_mean,
+        yend = lipid_mean,
+
+        stringsAsFactors = FALSE
+      )
+    }
+  )
+)
+
+# ------------------------------------------------------------
+# ΔGSVA values
+# ------------------------------------------------------------
+
+if ("mean_difference" %in% names(plot_dat)) {
+
+  delta_values <- as.numeric(
+    plot_dat$mean_difference
+  )
+
+} else {
+
+  delta_values <- sapply(
+    seq_len(nrow(plot_dat)),
+    function(i) {
+
+      mean(
+        as.numeric(
+          plot_dat[i, lipid_cols]
+        ),
+        na.rm = TRUE
+      ) -
+        mean(
+          as.numeric(
+            plot_dat[i, control_cols]
+          ),
+          na.rm = TRUE
+        )
+    }
+  )
+}
+
+# ------------------------------------------------------------
+# P-values
+# ------------------------------------------------------------
+
+if ("Wilcoxon_p" %in% names(plot_dat)) {
+
+  p_values <- as.numeric(
+    plot_dat$Wilcoxon_p
+  )
+
+} else if ("P_value" %in% names(plot_dat)) {
+
+  p_values <- as.numeric(
+    plot_dat$P_value
+  )
+
+} else if ("p_value" %in% names(plot_dat)) {
+
+  p_values <- as.numeric(
+    plot_dat$p_value
+  )
+
+} else if ("P" %in% names(plot_dat)) {
+
+  p_values <- as.numeric(
+    plot_dat$P
+  )
+
+} else {
+
+  p_values <- rep(
+    NA_real_,
+    nrow(plot_dat)
+  )
+
+  warning(
+    "No p-value column detected. P-values will be shown as NA."
+  )
+}
+
+# ------------------------------------------------------------
+# DYNAMIC Y-AXIS
+# ------------------------------------------------------------
+
+all_observations <- c(
+  long_dat$Value,
+  group_means$Mean
+)
+
+observed_min <- min(
+  all_observations,
+  na.rm = TRUE
+)
+
+observed_max <- max(
+  all_observations,
+  na.rm = TRUE
+)
+
+observed_span <- observed_max - observed_min
+
+if (observed_span == 0) {
+  observed_span <- max(
+    abs(observed_max),
+    1
+  )
+}
+
+lower_padding <- 0.12 * observed_span
+upper_padding <- 0.38 * observed_span
+
+y_lower <- observed_min - lower_padding
+y_upper <- observed_max + upper_padding
+
+y_range <- c(
+  y_lower,
+  y_upper
+)
+
+# ------------------------------------------------------------
+# Annotation positions
+#
+# ONLY CHANGE:
+# Reduced gap between ΔGSVA and P-value.
+# ------------------------------------------------------------
+
+label_y <- observed_max + 0.22 * observed_span
+
+p_label_y <- observed_max + 0.185 * observed_span
+
+# ------------------------------------------------------------
+# Annotation data
+# ------------------------------------------------------------
+
+annotation_dat <- data.frame(
+  Pathway = factor(
+    plot_dat$Pathway,
+    levels = c(
+      "DSB Repair",
+      "HR",
+      "NHEJ",
+      "DNA Repair",
+      "BER",
+      "MMR"
+    )
+  ),
+
+  x = seq_len(nrow(plot_dat)),
+
+  Delta = delta_values,
+
+  P = p_values,
+
+  stringsAsFactors = FALSE
+)
+
+# Format p-values
+annotation_dat$P_label <- sapply(
+  annotation_dat$P,
+  function(p) {
+
+    if (is.na(p)) {
+
+      "P = NA"
+
+    } else if (p < 0.001) {
+
+      "P < 0.001"
+
+    } else {
+
+      paste0(
+        "P = ",
+        formatC(
+          p,
+          format = "f",
+          digits = 3
+        )
+      )
+    }
+  }
+)
+
+# ------------------------------------------------------------
+# Plot
+# ------------------------------------------------------------
+
+library(ggplot2)
+
+p <- ggplot() +
+
+  # Light vertical separators
+  geom_vline(
+    xintercept = seq(
+      1.5,
+      5.5,
+      by = 1
+    ),
+    colour = "grey90",
+    linewidth = 0.5
+  ) +
+
+  # Dotted lines between mean diamonds
+  geom_segment(
+    data = mean_line_dat,
+    aes(
+      x = x,
+      xend = xend,
+      y = y,
+      yend = yend
+    ),
+    linetype = "dotted",
+    colour = "grey55",
+    linewidth = 0.7
+  ) +
+
+  # Control samples
+  geom_point(
+    data = long_dat[
+      long_dat$Group == "Control sample",
+      ,
+      drop = FALSE
+    ],
+    aes(
+      x = x,
+      y = Value
+    ),
+    shape = 16,
+    size = 2.6,
+    colour = "#B8860B"
+  ) +
+
+  # Lipid-loaded samples
+  geom_point(
+    data = long_dat[
+      long_dat$Group == "Lipid-loaded sample",
+      ,
+      drop = FALSE
+    ],
+    aes(
+      x = x,
+      y = Value
+    ),
+    shape = 16,
+    size = 2.6,
+    colour = "#7B3294"
+  ) +
+
+  # Control mean diamonds
+  geom_point(
+    data = group_means[
+      group_means$Group == "Control mean",
+      ,
+      drop = FALSE
+    ],
+    aes(
+      x = x,
+      y = Mean
+    ),
+    shape = 18,
+    size = 5.5,
+    colour = "#B8860B"
+  ) +
+
+  # Lipid-loaded mean diamonds
+  geom_point(
+    data = group_means[
+      group_means$Group == "Lipid-loaded mean",
+      ,
+      drop = FALSE
+    ],
+    aes(
+      x = x,
+      y = Mean
+    ),
+    shape = 18,
+    size = 5.5,
+    colour = "#7B3294"
+  ) +
+
+  # ----------------------------------------------------------
+  # ΔGSVA label
+  #
+  # ONLY CHANGE:
+  # Actual Greek delta symbol used.
+  # ----------------------------------------------------------
+
+  geom_text(
+    data = annotation_dat,
+    aes(
+      x = x,
+      y = label_y,
+      label = paste0(
+        "ΔGSVA = ",
+        sprintf(
+          "%.3f",
+          Delta
+        )
+      )
+    ),
+    family = "Helvetica",
+    size = 3.4,
+    fontface = "plain"
+  ) +
+
+  # P-value label
+  geom_text(
+    data = annotation_dat,
+    aes(
+      x = x,
+      y = p_label_y,
+      label = P_label
+    ),
+    family = "Helvetica",
+    size = 3.2,
+    fontface = "plain"
+  ) +
+
+  # X-axis
+  scale_x_continuous(
+    breaks = 1:6,
+    labels = c(
+      "DSB Repair",
+      "HR",
+      "NHEJ",
+      "DNA Repair",
+      "BER",
+      "MMR"
+    ),
+    expand = expansion(
+      mult = c(
+        0.02,
+        0.02
+      )
+    )
+  ) +
+
+  # Dynamic Y-axis
+  scale_y_continuous(
+    limits = y_range,
+    expand = expansion(
+      mult = c(
+        0,
+        0
+      )
+    )
+  ) +
+
+  # Dummy legend points
+  geom_point(
+    aes(
+      x = NA,
+      y = NA,
+      colour = "Control sample"
+    ),
+    shape = 16,
+    size = 2.6
+  ) +
+
+  geom_point(
+    aes(
+      x = NA,
+      y = NA,
+      colour = "Lipid-loaded sample"
+    ),
+    shape = 16,
+    size = 2.6
+  ) +
+
+  geom_point(
+    aes(
+      x = NA,
+      y = NA,
+      colour = "Control mean"
+    ),
+    shape = 18,
+    size = 5.5
+  ) +
+
+  geom_point(
+    aes(
+      x = NA,
+      y = NA,
+      colour = "Lipid-loaded mean"
+    ),
+    shape = 18,
+    size = 5.5
+  ) +
+
+  scale_colour_manual(
+    name = NULL,
+    values = c(
+      "Control sample" = "#B8860B",
+      "Lipid-loaded sample" = "#7B3294",
+      "Control mean" = "#B8860B",
+      "Lipid-loaded mean" = "#7B3294"
+    ),
+    breaks = c(
+      "Control sample",
+      "Lipid-loaded sample",
+      "Control mean",
+      "Lipid-loaded mean"
+    )
+  ) +
+
+  # Titles
+  labs(
+    title = "DDR Changes in Long Term Lipid Exposure",
+    subtitle = "GSE102536 Lipid Loaded vs Control (t=16 days, Loaded with OA:SA = 1:1)",
+    x = NULL,
+    y = "GSVA score"
+  ) +
+
+  # Theme
+  theme_classic(
+    base_family = "Helvetica"
+  ) +
+
+  theme(
+    plot.title = element_text(
+      hjust = 0.5,
+      face = "bold",
+      size = 16
+    ),
+
+    plot.subtitle = element_text(
+      hjust = 0.5,
+      size = 11
+    ),
+
+    axis.text.x = element_text(
+      size = 10
+    ),
+
+    axis.text.y = element_text(
+      size = 10
+    ),
+
+    axis.title.y = element_text(
+      size = 11
+    ),
+
+    legend.position = "bottom",
+
+    legend.text = element_text(
+      size = 9
+    ),
+
+    panel.grid = element_blank(),
+
+    plot.margin = margin(
+      15,
+      15,
+      15,
+      15
+    )
+  )
+
+# ------------------------------------------------------------
+# Display
+# ------------------------------------------------------------
+
+print(p)
+
+# ------------------------------------------------------------
+# Save to WORKING DIRECTORY
+# ------------------------------------------------------------
+
+ggsave(
+  filename = "DDR_Changes_Long_Term_Lipid_Exposure.png",
+  plot = p,
+  width = 11,
+  height = 7,
+  dpi = 600,
+  units = "in",
+  bg = "white"
+)
+
+ggsave(
+  filename = "DDR_Changes_Long_Term_Lipid_Exposure.pdf",
+  plot = p,
+  width = 11,
+  height = 7,
+  units = "in",
+  bg = "white"
+)
