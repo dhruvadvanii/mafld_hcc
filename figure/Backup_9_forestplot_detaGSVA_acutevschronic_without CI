@@ -1,0 +1,373 @@
+# ============================================================
+# FOREST PLOT
+# Acute vs Long-Term Lipid Exposure
+# GSE122151 vs GSE102536
+#
+# Effect = Mean difference (Lipid-loaded - Control)
+# ============================================================
+
+library(ggplot2)
+
+# ------------------------------------------------------------
+# Load GSE102536 data
+# ------------------------------------------------------------
+
+gse102536 <- read.csv(
+  "imp_results/06_GSE102536_GSVA_Control_vs_Lipid_Loaded_statistics(2).csv",
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+
+# ------------------------------------------------------------
+# Load GSE122151 data
+# ------------------------------------------------------------
+
+gse122151 <- read.csv(
+  "imp_results/10_GSE122151_GSVA_Control_vs_Lipid_Loaded_statistics(3).csv",
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+
+# ------------------------------------------------------------
+# Pathway mapping
+# ------------------------------------------------------------
+
+pathway_map_102536 <- c(
+  "DOUBLE_STRAND_BREAK_REPAIR" = "DSB Repair",
+  "HOMOLOGOUS_RECOMBINATION" = "HR",
+  "NON_HOMOLOGOUS_END_JOINING" = "NHEJ",
+  "HALLMARK_DNA_REPAIR" = "DNA Repair",
+  "BASE_EXCISION_REPAIR" = "BER",
+  "MISMATCH_REPAIR" = "MMR"
+)
+
+pathway_map_122151 <- c(
+  "DDR_CORE_REPAIR::REACTOME_DOUBLE_STRAND_BREAK_REPAIR.v2026.1.Hs.gmt::REACTOME_DOUBLE_STRAND_BREAK_REPAIR" =
+    "DSB Repair",
+
+  "DDR_CORE_REPAIR::REACTOME_HOMOLOGOUS_RECOMBINATION_REPAIR_OF_REPLICATION_INDEPENDENT_DOUBLE_STRAND_BREAKS.v2026.1.Hs.gmt::REACTOME_HOMOLOGOUS_RECOMBINATION_REPAIR_OF_REPLICATION_INDEPENDENT_DOUBLE_STRAND_BREAKS" =
+    "HR",
+
+  "DDR_CORE_REPAIR::REACTOME_NONHOMOLOGOUS_END_JOINING_NHEJ.v2026.1.Hs.gmt::REACTOME_NONHOMOLOGOUS_END_JOINING_NHEJ" =
+    "NHEJ",
+
+  "DDR_BROAD_REPAIR::HALLMARK_DNA_REPAIR.v2026.1.Hs.gmt::HALLMARK_DNA_REPAIR" =
+    "DNA Repair",
+
+  "DDR_CORE_REPAIR::REACTOME_BASE_EXCISION_REPAIR.v2026.1.Hs.gmt::REACTOME_BASE_EXCISION_RECISION_REPAIR" =
+    "BER",
+
+  "DDR_CORE_REPAIR::REACTOME_MISMATCH_REPAIR.v2026.1.Hs.gmt::REACTOME_MISMATCH_REPAIR" =
+    "MMR"
+)
+
+# ------------------------------------------------------------
+# Select pathways
+# ------------------------------------------------------------
+
+dat102536 <- gse102536[
+  gse102536$pathway %in% names(pathway_map_102536),
+  ,
+  drop = FALSE
+]
+
+dat122151 <- gse122151[
+  gse122151$pathway %in% names(pathway_map_122151),
+  ,
+  drop = FALSE
+]
+
+dat102536$Pathway <- pathway_map_102536[
+  match(dat102536$pathway, names(pathway_map_102536))
+]
+
+dat122151$Pathway <- pathway_map_122151[
+  match(dat122151$pathway, names(pathway_map_122151))
+]
+
+# ------------------------------------------------------------
+# Function to calculate paired mean difference
+# ------------------------------------------------------------
+
+calculate_paired_effect <- function(
+    dat,
+    dataset_name,
+    exposure_name
+) {
+
+  results <- lapply(
+    seq_len(nrow(dat)),
+    function(i) {
+
+      control <- as.numeric(
+        c(
+          dat$Control_1[i],
+          dat$Control_2[i],
+          dat$Control_3[i]
+        )
+      )
+
+      lipid_loaded <- as.numeric(
+        c(
+          dat$Lipid_Loaded_1[i],
+          dat$Lipid_Loaded_2[i],
+          dat$Lipid_Loaded_3[i]
+        )
+      )
+
+      # Paired differences
+      differences <- lipid_loaded - control
+
+      differences <- differences[
+        is.finite(differences)
+      ]
+
+      mean_difference <- mean(
+        differences
+      )
+
+      data.frame(
+        Pathway = dat$Pathway[i],
+        Dataset = dataset_name,
+        Exposure = exposure_name,
+        Mean_Difference = mean_difference,
+        stringsAsFactors = FALSE
+      )
+    }
+  )
+
+  do.call(
+    rbind,
+    results
+  )
+}
+
+# ------------------------------------------------------------
+# Calculate effects for both datasets
+# ------------------------------------------------------------
+
+forest_122151 <- calculate_paired_effect(
+  dat122151,
+  "GSE122151",
+  "Acute lipid exposure"
+)
+
+forest_102536 <- calculate_paired_effect(
+  dat102536,
+  "GSE102536",
+  "Long-term lipid exposure"
+)
+
+# ------------------------------------------------------------
+# Combine datasets
+# ------------------------------------------------------------
+
+forest_dat <- rbind(
+  forest_122151,
+  forest_102536
+)
+
+# ------------------------------------------------------------
+# Pathway order
+# ------------------------------------------------------------
+
+pathway_order <- c(
+  "DSB Repair",
+  "HR",
+  "NHEJ",
+  "DNA Repair",
+  "BER",
+  "MMR"
+)
+
+forest_dat$Pathway <- factor(
+  forest_dat$Pathway,
+  levels = rev(pathway_order)
+)
+
+# ------------------------------------------------------------
+# Separate the two datasets vertically
+# ------------------------------------------------------------
+
+forest_dat$y_base <- as.numeric(
+  forest_dat$Pathway
+)
+
+forest_dat$y <- forest_dat$y_base +
+  ifelse(
+    forest_dat$Dataset == "GSE122151",
+    0.14,
+    -0.14
+  )
+
+# ------------------------------------------------------------
+# Forest plot
+# ------------------------------------------------------------
+
+p <- ggplot(
+  forest_dat,
+  aes(
+    x = Mean_Difference,
+    y = y,
+    colour = Dataset
+  )
+) +
+
+  # Zero reference line
+  geom_vline(
+    xintercept = 0,
+    linetype = "dashed",
+    colour = "grey50",
+    linewidth = 0.6
+  ) +
+
+  # Horizontal lines between pathways
+  geom_hline(
+    yintercept = seq(
+      1.5,
+      5.5,
+      by = 1
+    ),
+    colour = "grey90",
+    linewidth = 0.5
+  ) +
+
+  # Mean difference point estimates
+  geom_point(
+    shape = 18,
+    size = 4.5
+  ) +
+
+  # Dataset colours
+  scale_colour_manual(
+    values = c(
+      "GSE122151" = "#D96B9A",
+      "GSE102536" = "#2A9D8F"
+    ),
+    labels = c(
+      "GSE122151" =
+        "GSE122151 — Acute lipid exposure",
+      "GSE102536" =
+        "GSE102536 — Long-term lipid exposure"
+    )
+  ) +
+
+  # Y-axis
+  scale_y_continuous(
+    breaks = seq_along(pathway_order),
+    labels = rev(pathway_order),
+    expand = expansion(
+      mult = c(
+        0.05,
+        0.05
+      )
+    )
+  ) +
+
+  # X-axis
+  scale_x_continuous(
+    expand = expansion(
+      mult = c(
+        0.08,
+        0.08
+      )
+    )
+  ) +
+
+  # Title
+  labs(
+    title =
+      "DDR Changes with Acute and Long-Term Lipid Exposure",
+
+    x =
+      "Mean difference in GSVA score (Lipid-loaded − Control)",
+
+    y = NULL,
+
+    colour = NULL
+  ) +
+
+  # Theme
+  theme_classic(
+    base_family = "Helvetica"
+  ) +
+
+  theme(
+
+    plot.title = element_text(
+      hjust = 0.5,
+      face = "bold",
+      size = 15
+    ),
+
+    axis.text.y = element_text(
+      size = 10
+    ),
+
+    axis.text.x = element_text(
+      size = 10
+    ),
+
+    axis.title.x = element_text(
+      size = 11,
+      face = "bold"
+    ),
+
+    legend.position = "bottom",
+
+    legend.text = element_text(
+      size = 9
+    ),
+
+    panel.grid = element_blank(),
+
+    plot.margin = margin(
+      15,
+      15,
+      15,
+      15
+    )
+  )
+
+# ------------------------------------------------------------
+# Display
+# ------------------------------------------------------------
+
+print(p)
+
+# ------------------------------------------------------------
+# Save PNG
+# ------------------------------------------------------------
+
+ggsave(
+  "DDR_Forest_Plot_Acute_vs_Long_Term.png",
+  p,
+  width = 10,
+  height = 7,
+  dpi = 600,
+  units = "in",
+  bg = "white"
+)
+
+# ------------------------------------------------------------
+# Save PDF
+# ------------------------------------------------------------
+
+ggsave(
+  "DDR_Forest_Plot_Acute_vs_Long_Term.pdf",
+  p,
+  width = 10,
+  height = 7,
+  units = "in",
+  bg = "white"
+)
+
+# ------------------------------------------------------------
+# Optional: save the numerical forest-plot data
+# ------------------------------------------------------------
+
+write.csv(
+  forest_dat,
+  "DDR_Forest_Plot_Acute_vs_Long_Term_statistics.csv",
+  row.names = FALSE
+)
