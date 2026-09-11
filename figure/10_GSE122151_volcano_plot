@@ -1,0 +1,244 @@
+# ============================================================
+# VOLCANO PLOT
+# DSB Gene Expression with Acute Lipid Exposure
+# GSE122151
+# ============================================================
+
+library(ggplot2)
+library(ggrepel)
+
+# ------------------------------------------------------------
+# Load data
+# ------------------------------------------------------------
+
+gene_stats <- read.csv(
+    "imp_results/12_GSE122151_DSB_HR_gene_expression_statistics.csv",
+    stringsAsFactors = FALSE,
+    check.names = FALSE
+)
+
+# ------------------------------------------------------------
+# Calculate plotting statistics
+# ------------------------------------------------------------
+
+gene_stats$Mean_Difference <- as.numeric(
+    gene_stats$mean_difference
+)
+
+gene_stats$FDR <- as.numeric(
+    gene_stats$FDR
+)
+
+gene_stats$Wilcoxon_p <- as.numeric(
+    gene_stats$Wilcoxon_p
+)
+
+# -log10 FDR
+gene_stats$NegLog10_FDR <- -log10(
+    pmax(gene_stats$FDR, 1e-300)
+)
+
+# ------------------------------------------------------------
+# Define directional categories
+# ------------------------------------------------------------
+
+gene_stats$Plot_Group <- ifelse(
+    gene_stats$Mean_Difference > 0,
+    "Positive difference",
+    "Negative difference"
+)
+
+# ------------------------------------------------------------
+# Gene labels
+# ------------------------------------------------------------
+
+gene_stats$Label <- gene_stats$gene
+
+# ------------------------------------------------------------
+# Volcano plot
+# ------------------------------------------------------------
+
+p <- ggplot(
+    gene_stats,
+    aes(
+        x = Mean_Difference,
+        y = NegLog10_FDR
+    )
+) +
+    
+    # Zero reference line
+    geom_vline(
+        xintercept = 0,
+        linetype = "dashed",
+        linewidth = 0.5,
+        colour = "grey55"
+    ) +
+    
+    # All genes
+    geom_point(
+        aes(
+            fill = Plot_Group
+        ),
+        shape = 21,
+        size = 3.2,
+        stroke = 0.35,
+        colour = "white"
+    ) +
+    
+    # Gene labels without leader lines
+    geom_text_repel(
+        aes(
+            label = Label
+        ),
+        family = "Helvetica",
+        size = 3.1,
+        colour = "black",
+        box.padding = 0.35,
+        point.padding = 0.15,
+        force = 1.2,
+        force_pull = 0.1,
+        max.overlaps = Inf,
+        min.segment.length = Inf,
+        segment.colour = NA,
+        seed = 123
+    ) +
+    
+    # Directional colours
+    scale_fill_manual(
+        values = c(
+            "Positive difference" = "#D73027",
+            "Negative difference" = "#2A9D8F"
+        ),
+        breaks = c(
+            "Positive difference",
+            "Negative difference"
+        ),
+        labels = c(
+            "Positive difference",
+            "Negative difference"
+        )
+    ) +
+    
+    # X-axis: fixed range
+    scale_x_continuous(
+        limits = c(
+            -0.5,
+            0.5
+        ),
+        breaks = seq(
+            -0.5,
+            0.5,
+            by = 0.1
+        ),
+        expand = c(
+            0,
+            0
+        )
+    ) +
+    
+    # Y-axis: fixed range
+    scale_y_continuous(
+        limits = c(
+            0,
+            1
+        ),
+        breaks = seq(
+            0,
+            1,
+            by = 0.2
+        ),
+        expand = c(
+            0,
+            0
+        )
+    ) +
+    
+    # Labels
+    labs(
+        title = "DSB Gene Expression Changes with Acute Lipid Exposure",
+        subtitle = "GSE122151 Lipid Loaded vs Control (t=72hr, Loaded with OA:PA = 2:1)",
+        x = "Mean expression difference (Lipid Loaded − Control)",
+        y = expression(-log[10]("FDR")),
+        fill = NULL
+    ) +
+    
+    # Publication-quality theme
+    theme_classic(
+        base_family = "Helvetica"
+    ) +
+    
+    theme(
+        
+        plot.title = element_text(
+            hjust = 0.5,
+            face = "bold",
+            size = 16
+        ),
+        
+        plot.subtitle = element_text(
+            hjust = 0.5,
+            size = 11
+        ),
+        
+        axis.title.x = element_text(
+            size = 11,
+            face = "bold"
+        ),
+        
+        axis.title.y = element_text(
+            size = 11,
+            face = "bold"
+        ),
+        
+        axis.text = element_text(
+            size = 10
+        ),
+        
+        legend.position = "bottom",
+        
+        legend.text = element_text(
+            size = 9
+        ),
+        
+        panel.grid = element_blank(),
+        
+        plot.margin = margin(
+            15,
+            25,
+            15,
+            15
+        )
+    )
+
+# ------------------------------------------------------------
+# Display
+# ------------------------------------------------------------
+
+print(p)
+
+# ------------------------------------------------------------
+# Save PNG directly to main directory
+# ------------------------------------------------------------
+
+ggsave(
+    "DSB_Gene_Expression_Acute_Lipid_Exposure_Volcano.png",
+    p,
+    width = 11,
+    height = 8,
+    dpi = 600,
+    units = "in",
+    bg = "white"
+)
+
+# ------------------------------------------------------------
+# Save PDF directly to main directory
+# ------------------------------------------------------------
+
+ggsave(
+    "DSB_Gene_Expression_Acute_Lipid_Exposure_Volcano.pdf",
+    p,
+    width = 11,
+    height = 8,
+    units = "in",
+    bg = "white"
+)
