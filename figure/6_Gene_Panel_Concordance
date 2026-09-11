@@ -1,0 +1,1107 @@
+# ============================================================
+# 77-GENE DSB PANEL
+# TCGA vs GSE76427
+# GENE-LEVEL CROSS-COHORT CONCORDANCE
+# ============================================================
+#
+# Colour:
+#   Concordant = GREEN
+#   Discordant = RED
+#
+# X-axis:
+#   TCGA Spearman rho
+#
+# Y-axis:
+#   GSE76427 Spearman rho
+#
+# Axis limits:
+#   -0.65 to +0.25 on BOTH axes
+#
+# Major tick interval:
+#   0.05
+#
+# Minor tick interval:
+#   0.025
+#
+# Gene labels:
+#   Direct labels
+#   No leader lines
+#   Same colour as corresponding point
+#   Helvetica font
+#
+# INPUTS:
+#   imp_results/Step14_TCGA_DSB_gene_correlations(2).csv
+#   imp_results/Step14_GSE76427_DSB_gene_correlations(2).csv
+#   imp_results/Step14_TCGA_GSE76427_DSB_gene_concordance(3).csv
+#
+# OUTPUTS:
+#   Main working directory
+#
+# ============================================================
+
+
+# ------------------------------------------------------------
+# 1. PACKAGES
+# ------------------------------------------------------------
+
+required_packages <- c(
+    "ggplot2",
+    "readr",
+    "dplyr"
+)
+
+for (pkg in required_packages) {
+    
+    if (!requireNamespace(pkg, quietly = TRUE)) {
+        install.packages(pkg)
+    }
+    
+}
+
+library(ggplot2)
+library(readr)
+library(dplyr)
+
+
+# ------------------------------------------------------------
+# 2. INPUT FILE PATHS
+# ------------------------------------------------------------
+
+tcga_file <- "imp_results/Step14_TCGA_DSB_gene_correlations(2).csv"
+
+gse_file <- "imp_results/Step14_GSE76427_DSB_gene_correlations(2).csv"
+
+concordance_file <- "imp_results/Step14_TCGA_GSE76427_DSB_gene_concordance(3).csv"
+
+
+# ------------------------------------------------------------
+# 3. CHECK INPUT FILES
+# ------------------------------------------------------------
+
+input_files <- c(
+    tcga_file,
+    gse_file,
+    concordance_file
+)
+
+missing_files <- input_files[
+    !file.exists(input_files)
+]
+
+if (length(missing_files) > 0) {
+    
+    stop(
+        paste0(
+            "\nThe following file(s) were not found:\n\n",
+            paste(
+                missing_files,
+                collapse = "\n"
+            ),
+            "\n\nMake sure all three files are inside ",
+            "the imp_results/ folder."
+        )
+    )
+    
+}
+
+
+# ------------------------------------------------------------
+# 4. READ FILES
+# ------------------------------------------------------------
+
+tcga <- read_csv(
+    tcga_file,
+    show_col_types = FALSE
+)
+
+gse <- read_csv(
+    gse_file,
+    show_col_types = FALSE
+)
+
+concordance <- read_csv(
+    concordance_file,
+    show_col_types = FALSE
+)
+
+
+# ------------------------------------------------------------
+# 5. STANDARDIZE GENE COLUMN
+# ------------------------------------------------------------
+
+if ("gene" %in% names(tcga)) {
+    
+    names(tcga)[
+        names(tcga) == "gene"
+    ] <- "Gene"
+    
+}
+
+if ("gene" %in% names(gse)) {
+    
+    names(gse)[
+        names(gse) == "gene"
+    ] <- "Gene"
+    
+}
+
+if ("gene" %in% names(concordance)) {
+    
+    names(concordance)[
+        names(concordance) == "gene"
+    ] <- "Gene"
+    
+}
+
+
+tcga$Gene <- toupper(
+    trimws(
+        as.character(
+            tcga$Gene
+        )
+    )
+)
+
+gse$Gene <- toupper(
+    trimws(
+        as.character(
+            gse$Gene
+        )
+    )
+)
+
+concordance$Gene <- toupper(
+    trimws(
+        as.character(
+            concordance$Gene
+        )
+    )
+)
+
+
+# ------------------------------------------------------------
+# 6. CHECK REQUIRED COLUMNS
+# ------------------------------------------------------------
+
+required_tcga <- c(
+    "Gene",
+    "rho",
+    "FDR"
+)
+
+required_gse <- c(
+    "Gene",
+    "Spearman_rho",
+    "BH_FDR"
+)
+
+required_concordance <- c(
+    "Gene",
+    "Direction_concordant"
+)
+
+
+missing_tcga <- setdiff(
+    required_tcga,
+    names(tcga)
+)
+
+missing_gse <- setdiff(
+    required_gse,
+    names(gse)
+)
+
+missing_concordance <- setdiff(
+    required_concordance,
+    names(concordance)
+)
+
+
+if (length(missing_tcga) > 0) {
+    
+    stop(
+        paste0(
+            "\nMissing TCGA columns:\n",
+            paste(
+                missing_tcga,
+                collapse = ", "
+            )
+        )
+    )
+    
+}
+
+
+if (length(missing_gse) > 0) {
+    
+    stop(
+        paste0(
+            "\nMissing GSE76427 columns:\n",
+            paste(
+                missing_gse,
+                collapse = ", "
+            )
+        )
+    )
+    
+}
+
+
+if (length(missing_concordance) > 0) {
+    
+    stop(
+        paste0(
+            "\nMissing concordance columns:\n",
+            paste(
+                missing_concordance,
+                collapse = ", "
+            )
+        )
+    )
+    
+}
+
+
+# ------------------------------------------------------------
+# 7. EXTRACT TCGA CORRELATIONS
+# ------------------------------------------------------------
+
+tcga_simple <- tcga %>%
+    
+    dplyr::select(
+        Gene,
+        TCGA_rho = rho,
+        TCGA_FDR = FDR
+    )
+
+
+# ------------------------------------------------------------
+# 8. EXTRACT GSE76427 CORRELATIONS
+# ------------------------------------------------------------
+
+gse_simple <- gse %>%
+    
+    dplyr::select(
+        Gene,
+        GSE_rho = Spearman_rho,
+        GSE_FDR = BH_FDR
+    )
+
+
+# ------------------------------------------------------------
+# 9. EXTRACT CONCORDANCE
+# ------------------------------------------------------------
+
+concordance_simple <- concordance %>%
+    
+    dplyr::select(
+        Gene,
+        Direction_concordant
+    )
+
+
+# ------------------------------------------------------------
+# 10. COMBINE DATASETS
+# ------------------------------------------------------------
+
+plot_data <- tcga_simple %>%
+    
+    dplyr::left_join(
+        gse_simple,
+        by = "Gene"
+    ) %>%
+    
+    dplyr::left_join(
+        concordance_simple,
+        by = "Gene"
+    )
+
+
+# ------------------------------------------------------------
+# 11. STANDARDIZE CONCORDANCE
+# ------------------------------------------------------------
+
+plot_data$Direction_concordant <- as.logical(
+    plot_data$Direction_concordant
+)
+
+
+# ------------------------------------------------------------
+# 12. CREATE CONCORDANCE CATEGORY
+# ------------------------------------------------------------
+
+plot_data <- plot_data %>%
+    
+    dplyr::mutate(
+        
+        Concordance = dplyr::case_when(
+            
+            is.na(TCGA_rho) |
+                is.na(GSE_rho) ~
+                NA_character_,
+            
+            Direction_concordant == TRUE ~
+                "Concordant",
+            
+            Direction_concordant == FALSE ~
+                "Discordant",
+            
+            TRUE ~
+                NA_character_
+            
+        )
+        
+    )
+
+
+# ------------------------------------------------------------
+# 13. FACTOR ORDER
+# ------------------------------------------------------------
+
+plot_data$Concordance <- factor(
+    
+    plot_data$Concordance,
+    
+    levels = c(
+        "Concordant",
+        "Discordant"
+    )
+    
+)
+
+
+# ------------------------------------------------------------
+# 14. COMPLETE CASES FOR PLOTTING
+# ------------------------------------------------------------
+
+plot_complete <- plot_data %>%
+    
+    dplyr::filter(
+        
+        !is.na(TCGA_rho),
+        
+        !is.na(GSE_rho),
+        
+        !is.na(Concordance)
+        
+    )
+
+
+# ------------------------------------------------------------
+# 15. SUMMARY
+# ------------------------------------------------------------
+
+cat("\n============================================\n")
+cat("77-GENE DSB PANEL SUMMARY\n")
+cat("============================================\n\n")
+
+cat(
+    "Genes in TCGA file:",
+    nrow(tcga),
+    "\n"
+)
+
+cat(
+    "Genes in GSE76427 file:",
+    nrow(gse),
+    "\n"
+)
+
+cat(
+    "Genes with both correlations:",
+    nrow(plot_complete),
+    "\n"
+)
+
+cat(
+    "\nConcordant:",
+    sum(
+        plot_complete$Concordance ==
+            "Concordant"
+    ),
+    "\n"
+)
+
+cat(
+    "Discordant:",
+    sum(
+        plot_complete$Concordance ==
+            "Discordant"
+    ),
+    "\n"
+)
+
+
+# ------------------------------------------------------------
+# 16. CHECK VALUES OUTSIDE REQUESTED RANGE
+# ------------------------------------------------------------
+#
+# Requested display range:
+#   -0.65 to +0.25
+#
+# coord_cartesian() is used below, so genes outside this range
+# are NOT deleted from the dataset.
+#
+# ------------------------------------------------------------
+
+outside_range <- plot_complete %>%
+    
+    dplyr::filter(
+        
+        TCGA_rho < -0.65 |
+            TCGA_rho > 0.25 |
+            
+            GSE_rho < -0.65 |
+            GSE_rho > 0.25
+        
+    )
+
+
+cat(
+    "\n============================================\n"
+)
+
+cat(
+    "VALUES OUTSIDE DISPLAY RANGE\n"
+)
+
+cat(
+    "============================================\n\n"
+)
+
+cat(
+    "Genes outside -0.65 to +0.25:",
+    nrow(outside_range),
+    "\n"
+)
+
+
+if (nrow(outside_range) > 0) {
+    
+    print(
+        outside_range %>%
+            dplyr::select(
+                Gene,
+                TCGA_rho,
+                GSE_rho,
+                Concordance
+            )
+    )
+    
+}
+
+
+# ------------------------------------------------------------
+# 17. COLOURS
+# ------------------------------------------------------------
+
+concordance_colours <- c(
+    
+    "Concordant" =
+        "#4C9A6A",
+    
+    "Discordant" =
+        "#C85A54"
+    
+)
+
+
+# ------------------------------------------------------------
+# 18. DIRECT LABEL POSITIONS
+# ------------------------------------------------------------
+#
+# Labels are placed directly next to points.
+#
+# No leader lines.
+#
+# Alternating offsets are used to reduce overlap.
+#
+# ------------------------------------------------------------
+
+plot_complete <- plot_complete %>%
+    
+    dplyr::arrange(
+        TCGA_rho,
+        GSE_rho
+    ) %>%
+    
+    dplyr::mutate(
+        
+        label_offset = dplyr::case_when(
+            
+            row_number() %% 4 == 1 ~
+                0.012,
+            
+            row_number() %% 4 == 2 ~
+                -0.012,
+            
+            row_number() %% 4 == 3 ~
+                0.020,
+            
+            TRUE ~
+                -0.020
+            
+        ),
+        
+        label_y =
+            GSE_rho +
+            label_offset
+        
+    )
+
+
+# ------------------------------------------------------------
+# 19. AXIS BREAKS
+# ------------------------------------------------------------
+#
+# Major ticks every 0.05.
+#
+# ------------------------------------------------------------
+
+axis_breaks <- seq(
+    -0.65,
+    0.25,
+    by = 0.05
+)
+
+
+# ------------------------------------------------------------
+# 20. MINOR BREAKS
+# ------------------------------------------------------------
+
+minor_breaks <- seq(
+    -0.65,
+    0.25,
+    by = 0.025
+)
+
+
+# ------------------------------------------------------------
+# 21. CREATE PUBLICATION-QUALITY FIGURE
+# ------------------------------------------------------------
+
+p <- ggplot(
+    
+    plot_complete,
+    
+    aes(
+        x = TCGA_rho,
+        y = GSE_rho
+    )
+    
+) +
+    
+    
+    # ==========================================================
+    # ZERO REFERENCE LINES
+    # ==========================================================
+
+geom_hline(
+    
+    yintercept = 0,
+    
+    linewidth = 0.55,
+    
+    colour = "grey78"
+    
+) +
+    
+    geom_vline(
+        
+        xintercept = 0,
+        
+        linewidth = 0.55,
+        
+        colour = "grey78"
+        
+    ) +
+    
+    
+    # ==========================================================
+    # IDENTITY LINE
+    # ==========================================================
+
+geom_abline(
+    
+    intercept = 0,
+    
+    slope = 1,
+    
+    linewidth = 0.55,
+    
+    linetype = "dashed",
+    
+    colour = "grey62"
+    
+) +
+    
+    
+    # ==========================================================
+    # GENE POINTS
+    # ==========================================================
+
+geom_point(
+    
+    aes(
+        fill = Concordance
+    ),
+    
+    shape = 21,
+    
+    colour = "white",
+    
+    stroke = 0.65,
+    
+    size = 3.7,
+    
+    alpha = 0.95
+    
+) +
+    
+    
+    # ==========================================================
+    # GENE LABELS
+    # ==========================================================
+    #
+    # Same colour as corresponding point.
+    # No leader lines.
+    #
+    
+geom_text(
+    
+    aes(
+        
+        x = TCGA_rho,
+        
+        y = label_y,
+        
+        label = Gene,
+        
+        colour = Concordance
+        
+    ),
+    
+    family = "Helvetica",
+    
+    size = 2.55,
+    
+    fontface = "plain",
+    
+    check_overlap = FALSE
+    
+) +
+    
+    
+    # ==========================================================
+    # POINT COLOURS
+    # ==========================================================
+
+scale_fill_manual(
+    
+    values = concordance_colours,
+    
+    breaks = c(
+        "Concordant",
+        "Discordant"
+    ),
+    
+    drop = FALSE
+    
+) +
+    
+    
+    # ==========================================================
+    # LABEL COLOURS
+    # ==========================================================
+
+scale_colour_manual(
+    
+    values = concordance_colours,
+    
+    guide = "none"
+    
+) +
+    
+    
+    # ==========================================================
+    # X AXIS
+    # ==========================================================
+
+scale_x_continuous(
+    
+    breaks = axis_breaks,
+    
+    minor_breaks = minor_breaks,
+    
+    labels = function(x) {
+        
+        sprintf(
+            "%.2f",
+            x
+        )
+        
+    },
+    
+    expand = c(
+        0,
+        0
+    )
+    
+) +
+    
+    
+    # ==========================================================
+    # Y AXIS
+    # ==========================================================
+
+scale_y_continuous(
+    
+    breaks = axis_breaks,
+    
+    minor_breaks = minor_breaks,
+    
+    labels = function(x) {
+        
+        sprintf(
+            "%.2f",
+            x
+        )
+        
+    },
+    
+    expand = c(
+        0,
+        0
+    )
+    
+) +
+    
+    
+    # ==========================================================
+    # FIXED DISPLAY WINDOW
+    # ==========================================================
+
+coord_cartesian(
+    
+    xlim = c(
+        -0.65,
+        0.25
+    ),
+    
+    ylim = c(
+        -0.65,
+        0.25
+    ),
+    
+    expand = FALSE,
+    
+    clip = "on"
+    
+) +
+    
+    
+    # ==========================================================
+    # TITLES
+    # ==========================================================
+
+labs(
+    
+    title =
+        "DSB Gene Panel: Cross-Cohort Concordance",
+    
+    subtitle =
+        "Gene-level correlation with Fatty Acid Metabolism",
+    
+    x =
+        "TCGA Spearman ρ",
+    
+    y =
+        "GSE76427 Spearman ρ",
+    
+    fill =
+        NULL
+    
+) +
+    
+    
+    # ==========================================================
+    # PUBLICATION THEME
+    # ==========================================================
+
+theme_classic(
+    
+    base_family = "Helvetica"
+    
+) +
+    
+    theme(
+        
+        # --------------------------------------------------------
+        # Title
+        # --------------------------------------------------------
+        
+        plot.title = element_text(
+            
+            size = 17,
+            
+            face = "bold",
+            
+            hjust = 0.5,
+            
+            margin = margin(
+                b = 5
+            )
+            
+        ),
+        
+        # --------------------------------------------------------
+        # Subtitle
+        # --------------------------------------------------------
+        
+        plot.subtitle = element_text(
+            
+            size = 10.5,
+            
+            colour = "grey35",
+            
+            hjust = 0.5,
+            
+            margin = margin(
+                b = 15
+            )
+            
+        ),
+        
+        # --------------------------------------------------------
+        # Axis titles
+        # --------------------------------------------------------
+        
+        axis.title = element_text(
+            
+            size = 12,
+            
+            face = "bold"
+            
+        ),
+        
+        # --------------------------------------------------------
+        # Axis text
+        # --------------------------------------------------------
+        
+        axis.text = element_text(
+            
+            size = 9,
+            
+            colour = "black"
+            
+        ),
+        
+        # --------------------------------------------------------
+        # Axis ticks
+        # --------------------------------------------------------
+        
+        axis.ticks = element_line(
+            
+            linewidth = 0.55,
+            
+            colour = "black"
+            
+        ),
+        
+        axis.ticks.length = unit(
+            
+            0.15,
+            
+            "cm"
+            
+        ),
+        
+        # --------------------------------------------------------
+        # Legend
+        # --------------------------------------------------------
+        
+        legend.position = "bottom",
+        
+        legend.direction = "horizontal",
+        
+        legend.title = element_text(
+            
+            size = 10,
+            
+            face = "bold"
+            
+        ),
+        
+        legend.text = element_text(
+            
+            size = 9.5
+            
+        ),
+        
+        legend.key.size = unit(
+            
+            0.45,
+            
+            "cm"
+            
+        ),
+        
+        # --------------------------------------------------------
+        # Plot margins
+        # --------------------------------------------------------
+        
+        plot.margin = margin(
+            
+            t = 15,
+            
+            r = 20,
+            
+            b = 15,
+            
+            l = 20
+            
+        )
+        
+    )
+
+
+# ------------------------------------------------------------
+# 22. DISPLAY
+# ------------------------------------------------------------
+
+print(p)
+
+
+# ------------------------------------------------------------
+# 23. SAVE PDF TO MAIN DIRECTORY
+# ------------------------------------------------------------
+
+ggsave(
+    
+    filename =
+        "77_Gene_DSB_Panel_TCGA_GSE76427_Concordance.pdf",
+    
+    plot = p,
+    
+    width = 10,
+    
+    height = 9,
+    
+    units = "in",
+    
+    device = "pdf"
+    
+)
+
+
+# ------------------------------------------------------------
+# 24. SAVE 600 DPI PNG TO MAIN DIRECTORY
+# ------------------------------------------------------------
+
+ggsave(
+    
+    filename =
+        "77_Gene_DSB_Panel_TCGA_GSE76427_Concordance.png",
+    
+    plot = p,
+    
+    width = 10,
+    
+    height = 9,
+    
+    units = "in",
+    
+    dpi = 600
+    
+)
+
+
+
+# ------------------------------------------------------------
+# 28. FINAL SUMMARY
+# ------------------------------------------------------------
+
+cat(
+    "\n============================================\n"
+)
+
+cat(
+    "ANALYSIS COMPLETE\n"
+)
+
+cat(
+    "============================================\n\n"
+)
+
+cat(
+    "Genes plotted:",
+    nrow(plot_complete),
+    "\n"
+)
+
+cat(
+    "Concordant:",
+    sum(
+        plot_complete$Concordance ==
+            "Concordant"
+    ),
+    "\n"
+)
+
+cat(
+    "Discordant:",
+    sum(
+        plot_complete$Concordance ==
+            "Discordant"
+    ),
+    "\n"
+)
+
+cat(
+    "\nAxis range:\n"
+)
+
+cat(
+    "  X: -0.65 to +0.25\n"
+)
+
+cat(
+    "  Y: -0.65 to +0.25\n"
+)
+
+cat(
+    "  Major interval: 0.05\n"
+)
+
+cat(
+    "  Minor interval: 0.025\n"
+)
+
+cat(
+    "\nOutput files saved to MAIN DIRECTORY:\n"
+)
+
+cat(
+    "  77_Gene_DSB_Panel_TCGA_GSE76427_Concordance.pdf\n"
+)
+
+cat(
+    "  77_Gene_DSB_Panel_TCGA_GSE76427_Concordance.png\n"
+)
+
+cat(
+    "  77_Gene_DSB_Panel_TCGA_GSE76427_Concordance_Data.csv\n"
+)
+
+cat(
+    "  77_Gene_DSB_Panel_TCGA_GSE76427_Concordance_Summary.csv\n"
+)
+
+cat(
+    "\n============================================\n"
+)
+
+
+# ------------------------------------------------------------
+# END
+# ------------------------------------------------------------
