@@ -1,0 +1,742 @@
+# ============================================================
+# GSE122151 — ΔGSVA Effect Plot
+#
+# EACH PATHWAY HAS 3 SUBCOLUMNS:
+#
+#   Subcolumn 1       Subcolumn 2             Subcolumn 3
+#   Sample 1          Sample 2 + MEANS        Sample 3
+#
+#   ● Control 1       ● Control 2             ● Control 3
+#   ● Lipid 1         ● Lipid 2               ● Lipid 3
+#                     ◆ Control mean
+#                     ◆ Lipid-loaded mean
+#                     ⋮
+#                     dotted grey line
+#
+# Mean diamonds occupy EXACTLY the same x-coordinate.
+#
+# ============================================================
+
+
+# ------------------------------------------------------------
+# 1. Load package
+# ------------------------------------------------------------
+
+library(ggplot2)
+
+# ------------------------------------------------------------
+# 2. INPUT FILE
+# ------------------------------------------------------------
+
+input_file <- paste0(
+    "imp_results/",
+    "10_GSE122151_GSVA_Control_vs_Lipid_Loaded_statistics.csv"
+)
+
+
+# ------------------------------------------------------------
+# 3. CHECK INPUT FILE
+# ------------------------------------------------------------
+
+if (!file.exists(input_file)) {
+    
+    stop(
+        paste0(
+            "\nInput file not found:\n",
+            input_file,
+            "\n\nMake sure the file is inside the imp_results/ folder."
+        )
+    )
+    
+}
+
+
+# ------------------------------------------------------------
+# 4. READ DATA
+# ------------------------------------------------------------
+
+gsva_stats <- read_csv(
+    input_file,
+    show_col_types = FALSE
+)
+
+
+# ------------------------------------------------------------
+# 5. DISPLAY COLUMNS
+# ------------------------------------------------------------
+
+cat(
+    "\n============================================\n"
+)
+
+cat(
+    "INPUT FILE COLUMNS\n"
+)
+
+cat(
+    "============================================\n\n"
+)
+
+print(
+    names(gsva_stats)
+)
+# ------------------------------------------------------------
+# 2. Exact pathway names
+# ------------------------------------------------------------
+
+pathway_map <- c(
+
+  "DDR_CORE_REPAIR::REACTOME_DOUBLE_STRAND_BREAK_REPAIR.v2026.1.Hs.gmt::REACTOME_DOUBLE_STRAND_BREAK_REPAIR" =
+    "DSB Repair",
+
+  "DDR_CORE_REPAIR::REACTOME_HOMOLOGOUS_RECOMBINATION_REPAIR_OF_REPLICATION_INDEPENDENT_DOUBLE_STRAND_BREAKS.v2026.1.Hs.gmt::REACTOME_HOMOLOGOUS_RECOMBINATION_REPAIR_OF_REPLICATION_INDEPENDENT_DOUBLE_STRAND_BREAKS" =
+    "HR",
+
+  "DDR_CORE_REPAIR::REACTOME_NONHOMOLOGOUS_END_JOINING_NHEJ.v2026.1.Hs.gmt::REACTOME_NONHOMOLOGOUS_END_JOINING_NHEJ" =
+    "NHEJ",
+
+  "DDR_BROAD_REPAIR::HALLMARK_DNA_REPAIR.v2026.1.Hs.gmt::HALLMARK_DNA_REPAIR" =
+    "DNA Repair",
+
+  "DDR_CORE_REPAIR::REACTOME_BASE_EXCISION_REPAIR.v2026.1.Hs.gmt::REACTOME_BASE_EXCISION_REPAIR" =
+    "BER",
+
+  "DDR_CORE_REPAIR::REACTOME_MISMATCH_REPAIR.v2026.1.Hs.gmt::REACTOME_MISMATCH_REPAIR" =
+    "MMR"
+)
+
+
+# ------------------------------------------------------------
+# 3. Check that all pathways exist
+# ------------------------------------------------------------
+
+missing_pathways <- setdiff(
+  names(pathway_map),
+  gsva_stats$pathway
+)
+
+if (length(missing_pathways) > 0) {
+
+  stop(
+    paste0(
+      "The following pathways were not found:\n\n",
+      paste(missing_pathways, collapse = "\n")
+    )
+  )
+}
+
+
+# ------------------------------------------------------------
+# 4. Extract pathways in desired order
+# ------------------------------------------------------------
+
+plot_dat <- gsva_stats[
+  match(
+    names(pathway_map),
+    gsva_stats$pathway
+  ),
+  ,
+  drop = FALSE
+]
+
+plot_dat$Pathway <- unname(
+  pathway_map[plot_dat$pathway]
+)
+
+plot_dat$Pathway <- factor(
+  plot_dat$Pathway,
+  levels = c(
+    "DSB Repair",
+    "HR",
+    "NHEJ",
+    "DNA Repair",
+    "BER",
+    "MMR"
+  )
+)
+
+
+# ------------------------------------------------------------
+# 5. Sample columns
+# ------------------------------------------------------------
+
+sample_columns <- c(
+  "Control_1",
+  "Control_2",
+  "Control_3",
+  "Lipid_Loaded_1",
+  "Lipid_Loaded_2",
+  "Lipid_Loaded_3"
+)
+
+
+# ------------------------------------------------------------
+# 6. Create long-format sample data
+# ------------------------------------------------------------
+
+long_dat <- data.frame(
+
+  Pathway = rep(
+    plot_dat$Pathway,
+    each = 6
+  ),
+
+  Sample = rep(
+    sample_columns,
+    times = nrow(plot_dat)
+  ),
+
+  Group = rep(
+    c(
+      "Control",
+      "Control",
+      "Control",
+      "Lipid-loaded",
+      "Lipid-loaded",
+      "Lipid-loaded"
+    ),
+    times = nrow(plot_dat)
+  ),
+
+  GSVA = as.vector(
+    t(
+      plot_dat[
+        ,
+        sample_columns
+      ]
+    )
+  )
+)
+
+
+# ------------------------------------------------------------
+# 7. Numeric pathway position
+# ------------------------------------------------------------
+
+long_dat$Pathway_num <- as.numeric(
+  long_dat$Pathway
+)
+
+
+# ------------------------------------------------------------
+# 8. Assign the THREE subcolumns
+#
+# Subcolumn 1 = replicate 1
+# Subcolumn 2 = replicate 2 + means
+# Subcolumn 3 = replicate 3
+#
+# IMPORTANT:
+# Explicitly assign replicate based on SAMPLE NAME so that
+# Control_1/Lipid_Loaded_1 are always in subcolumn 1,
+# Control_2/Lipid_Loaded_2 are always in subcolumn 2,
+# Control_3/Lipid_Loaded_3 are always in subcolumn 3.
+# ------------------------------------------------------------
+
+long_dat$Replicate <- match(
+  long_dat$Sample,
+  c(
+    "Control_1",
+    "Lipid_Loaded_1",
+    "Control_2",
+    "Lipid_Loaded_2",
+    "Control_3",
+    "Lipid_Loaded_3"
+  )
+)
+
+long_dat$Replicate <- ceiling(
+  long_dat$Replicate / 2
+)
+
+
+# ------------------------------------------------------------
+# 9. X positions for individual samples
+#
+# Three closely spaced subcolumns:
+#
+#   -0.25        0        +0.25
+#
+# Within each subcolumn:
+#   Control       = -0.045
+#   Lipid-loaded  = +0.045
+#
+# Therefore:
+#
+#   Replicate 1: Control/Lipid = -0.295 / -0.205
+#   Replicate 2: Control/Lipid = -0.045 / +0.045
+#   Replicate 3: Control/Lipid = +0.205 / +0.295
+# ------------------------------------------------------------
+
+subcolumn_offsets <- c(
+  -0.25,
+   0.00,
+   0.25
+)
+
+long_dat$x <- long_dat$Pathway_num +
+
+  subcolumn_offsets[
+    long_dat$Replicate
+  ] +
+
+  ifelse(
+    long_dat$Group == "Control",
+    -0.045,
+    0.045
+  )
+
+
+# ------------------------------------------------------------
+# 10. Calculate means
+# ------------------------------------------------------------
+
+group_means <- aggregate(
+
+  GSVA ~ Pathway + Pathway_num + Group,
+
+  data = long_dat,
+
+  FUN = mean
+)
+
+
+# ------------------------------------------------------------
+# 11. IMPORTANT:
+# Put BOTH means at the EXACT SAME x position
+#
+# They occupy the centre of Subcolumn 2.
+# ------------------------------------------------------------
+
+group_means$x <-
+  group_means$Pathway_num
+
+
+# ------------------------------------------------------------
+# 12. Mean connector
+#
+# This contains ONLY the two means for each pathway.
+# Since x is identical, the dotted line is vertical.
+# ------------------------------------------------------------
+
+mean_line_dat <- group_means[
+  order(
+    group_means$Pathway_num,
+    group_means$GSVA
+  ),
+]
+
+
+# ------------------------------------------------------------
+# 13. ΔGSVA values
+# ------------------------------------------------------------
+
+delta_dat <- data.frame(
+
+  Pathway = plot_dat$Pathway,
+
+  Pathway_num = seq_len(
+    nrow(plot_dat)
+  ),
+
+  Delta_GSVA = plot_dat$mean_difference
+)
+
+
+# ------------------------------------------------------------
+# 14. Y-position for ΔGSVA
+# ------------------------------------------------------------
+
+y_range <- range(
+  long_dat$GSVA,
+  na.rm = TRUE
+)
+
+y_buffer <- 0.15 *
+  diff(y_range)
+
+label_y <-
+  y_range[2] + y_buffer
+
+
+# ------------------------------------------------------------
+# 15. Vertical pathway separators
+# ------------------------------------------------------------
+
+separator_dat <- data.frame(
+
+  x = seq(
+    1.5,
+    nrow(plot_dat) - 0.5,
+    by = 1
+  )
+)
+
+
+# ------------------------------------------------------------
+# 16. Create plot
+# ------------------------------------------------------------
+
+p <- ggplot2::ggplot() +
+
+  # ==========================================================
+  # LIGHT VERTICAL LINES BETWEEN PATHWAYS
+  # ==========================================================
+
+  ggplot2::geom_vline(
+
+    data = separator_dat,
+
+    ggplot2::aes(
+      xintercept = x
+    ),
+
+    colour = "grey90",
+
+    linewidth = 0.45
+  ) +
+
+
+  # ==========================================================
+  # CONTROL INDIVIDUAL SAMPLES
+  # ==========================================================
+
+  ggplot2::geom_point(
+
+    data = long_dat[
+      long_dat$Group == "Control",
+      ,
+      drop = FALSE
+    ],
+
+    ggplot2::aes(
+      x = x,
+      y = GSVA
+    ),
+
+    shape = 16,
+
+    size = 2.0,
+
+    colour = "#B8860B"
+  ) +
+
+
+  # ==========================================================
+  # LIPID-LOADED INDIVIDUAL SAMPLES
+  # ==========================================================
+
+  ggplot2::geom_point(
+
+    data = long_dat[
+      long_dat$Group == "Lipid-loaded",
+      ,
+      drop = FALSE
+    ],
+
+    ggplot2::aes(
+      x = x,
+      y = GSVA
+    ),
+
+    shape = 16,
+
+    size = 2.0,
+
+    colour = "#7B3294"
+  ) +
+
+
+  # ==========================================================
+  # DOTTED LINE CONNECTING MEANS ONLY
+  # ==========================================================
+
+  ggplot2::geom_line(
+
+    data = mean_line_dat,
+
+    ggplot2::aes(
+      x = x,
+      y = GSVA,
+      group = Pathway_num
+    ),
+
+    colour = "grey50",
+
+    linewidth = 0.8,
+
+    linetype = "dotted"
+  ) +
+
+
+  # ==========================================================
+  # CONTROL MEAN DIAMONDS
+  # ==========================================================
+
+  ggplot2::geom_point(
+
+    data = group_means[
+      group_means$Group == "Control",
+      ,
+      drop = FALSE
+    ],
+
+    ggplot2::aes(
+      x = x,
+      y = GSVA
+    ),
+
+    shape = 18,
+
+    size = 5.5,
+
+    colour = "#B8860B"
+  ) +
+
+
+  # ==========================================================
+  # LIPID-LOADED MEAN DIAMONDS
+  # ==========================================================
+
+  ggplot2::geom_point(
+
+    data = group_means[
+      group_means$Group == "Lipid-loaded",
+      ,
+      drop = FALSE
+    ],
+
+    ggplot2::aes(
+      x = x,
+      y = GSVA
+    ),
+
+    shape = 18,
+
+    size = 5.5,
+
+    colour = "#7B3294"
+  ) +
+
+
+  # ==========================================================
+  # ΔGSVA LABEL
+  #
+  # The label sits above the central subcolumn.
+  # ==========================================================
+
+  ggplot2::geom_text(
+
+    data = delta_dat,
+
+    ggplot2::aes(
+
+      x = Pathway_num,
+
+      y = label_y,
+
+      label = paste0(
+        "\u0394GSVA = ",
+        sprintf(
+          "%.3f",
+          Delta_GSVA
+        )
+      )
+    ),
+
+    family = "Helvetica",
+
+    size = 3.7
+  ) +
+
+
+  # ==========================================================
+  # LEGEND
+  # ==========================================================
+
+  ggplot2::scale_colour_manual(
+
+    name = NULL,
+
+    values = c(
+
+      "Control sample" =
+        "#B8860B",
+
+      "Lipid-loaded sample" =
+        "#7B3294",
+
+      "Control mean" =
+        "#B8860B",
+
+      "Lipid-loaded mean" =
+        "#7B3294"
+    )
+  ) +
+
+
+  # ==========================================================
+  # X AXIS
+  # ==========================================================
+
+  ggplot2::scale_x_continuous(
+
+    breaks = seq(
+      1,
+      nrow(plot_dat)
+    ),
+
+    labels = levels(
+      plot_dat$Pathway
+    ),
+
+    expand =
+      ggplot2::expansion(
+        mult = c(
+          0.02,
+          0.02
+        )
+      )
+  ) +
+
+
+  # ==========================================================
+  # LABELS
+  # ==========================================================
+
+  ggplot2::labs(
+
+    title =
+      "DDR Changes in Acute Lipid Stress",
+
+    subtitle =
+      "GSE122151 Lipid-Loaded vs Control (t=72 hrs; Loaded with OA:PA = 2:1 Ratio)",
+
+    x = NULL,
+
+    y =
+      "GSVA enrichment score"
+  ) +
+
+
+  # ==========================================================
+  # THEME
+  # ==========================================================
+
+  ggplot2::theme_classic(
+
+    base_family = "Helvetica"
+  ) +
+
+  ggplot2::theme(
+
+    plot.title =
+      ggplot2::element_text(
+        family = "Helvetica",
+        face = "bold",
+        size = 16,
+        hjust = 0.5
+      ),
+
+    plot.subtitle =
+      ggplot2::element_text(
+        family = "Helvetica",
+        size = 11,
+        hjust = 0.5
+      ),
+
+    axis.title.y =
+      ggplot2::element_text(
+        family = "Helvetica",
+        size = 12
+      ),
+
+    axis.text.x =
+      ggplot2::element_text(
+        family = "Helvetica",
+        size = 11
+      ),
+
+    axis.text.y =
+      ggplot2::element_text(
+        family = "Helvetica",
+        size = 10
+      ),
+
+    legend.text =
+      ggplot2::element_text(
+        family = "Helvetica",
+        size = 10
+      ),
+
+    legend.position =
+      "top",
+
+    plot.margin =
+      ggplot2::margin(
+        10,
+        15,
+        10,
+        10
+      )
+  ) +
+
+
+  # ==========================================================
+  # ROOM FOR ΔGSVA LABELS
+  # ==========================================================
+
+  ggplot2::coord_cartesian(
+
+    ylim = c(
+      y_range[1],
+      label_y +
+        0.05 * diff(y_range)
+    )
+  )
+
+
+# ------------------------------------------------------------
+# 17. Display
+# ------------------------------------------------------------
+
+print(p)
+
+
+# ------------------------------------------------------------
+# 18. Save PNG
+# ------------------------------------------------------------
+
+ggplot2::ggsave(
+
+  filename =
+    "GSE122151_DDR_Delta_GSVA_Effect_Plot.png",
+
+  plot = p,
+
+  width = 11,
+
+  height = 7,
+
+  units = "in",
+
+  dpi = 600
+)
+
+
+# ------------------------------------------------------------
+# 19. Save PDF
+# ------------------------------------------------------------
+
+ggplot2::ggsave(
+
+  filename =
+    "GSE122151_DDR_Delta_GSVA_Effect_Plot.pdf",
+
+  plot = p,
+
+  width = 11,
+
+  height = 7,
+
+  units = "in"
+)
