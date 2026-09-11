@@ -1,0 +1,1312 @@
+# ============================================================
+# MAFLD-HCC MANUSCRIPT
+# MODEL 4 MEDIATION ANALYSIS
+#
+# MODEL:
+#
+# Fatty acid metabolism
+#          ↓
+#    G2/M checkpoint
+#          ↓
+#   DNA repair pathway
+#
+# X = HALLMARK_FATTY_ACID_METABOLISM
+# M = G2M_CHECKPOINT
+#
+# Y:
+#   HOMOLOGOUS_RECOMBINATION
+#   NON_HOMOLOGOUS_END_JOINING
+#   DOUBLE_STRAND_BREAK_REPAIR
+#
+# DATASETS:
+#   TCGA
+#   GSE76427
+#
+# TOTAL TESTS:
+#   3 outcomes × 2 datasets = 6 mediation analyses
+#
+# METHOD:
+#   Linear regression
+#   Bootstrap mediation
+#   5,000 simulations
+#   Benjamini-Hochberg FDR correction
+#
+# IMPORTANT:
+# This is an association-based mediation analysis.
+# It does NOT establish causal mediation.
+# ============================================================
+
+
+# ============================================================
+# 1. PACKAGES
+# ============================================================
+
+required_packages <- c(
+  "mediation",
+  "dplyr",
+  "tibble",
+  "readr"
+)
+
+
+for (pkg in required_packages) {
+
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+
+    install.packages(
+      pkg,
+      repos = "https://cloud.r-project.org"
+    )
+  }
+}
+
+
+library(mediation)
+library(dplyr)
+library(tibble)
+library(readr)
+
+
+# ============================================================
+# 2. CREATE RESULTS DIRECTORY
+# ============================================================
+
+results_dir <- file.path(
+  "results",
+  "mediation"
+)
+
+
+if (!dir.exists(results_dir)) {
+
+  dir.create(
+    results_dir,
+    recursive = TRUE
+  )
+}
+
+
+# ============================================================
+# 3. DEFINE VARIABLES
+# ============================================================
+
+# ------------------------------------------------------------
+# X: Fatty acid metabolism
+# ------------------------------------------------------------
+
+x_variable <- "HALLMARK_FATTY_ACID_METABOLISM"
+
+
+# ------------------------------------------------------------
+# M: G2/M checkpoint
+# ------------------------------------------------------------
+
+mediator_variable <- "G2M_CHECKPOINT"
+
+
+# ------------------------------------------------------------
+# Y: DNA repair outcomes
+# ------------------------------------------------------------
+
+outcome_variables <- c(
+  "HOMOLOGOUS_RECOMBINATION",
+  "NON_HOMOLOGOUS_END_JOINING",
+  "DOUBLE_STRAND_BREAK_REPAIR"
+)
+
+
+# ============================================================
+# 4. CHECK REQUIRED OBJECTS
+# ============================================================
+
+required_objects <- c(
+  "tcga_pathway_scores",
+  "gse_pathway_scores"
+)
+
+
+for (object_name in required_objects) {
+
+  if (!exists(object_name)) {
+
+    stop(
+      paste0(
+        "\nRequired object not found: ",
+        object_name,
+        "\n\n",
+        "Make sure tcga_pathway_scores and ",
+        "gse_pathway_scores are loaded in the current R session.\n"
+      )
+    )
+  }
+}
+
+
+# ============================================================
+# 5. CHECK REQUIRED PATHWAYS
+# ============================================================
+
+check_pathways <- function(
+    pathway_matrix,
+    dataset_name,
+    x_variable,
+    mediator_variable,
+    outcome_variables
+) {
+
+  pathway_matrix <- as.matrix(
+    pathway_matrix
+  )
+
+
+  required_rows <- c(
+    x_variable,
+    mediator_variable,
+    outcome_variables
+  )
+
+
+  missing_rows <- setdiff(
+    required_rows,
+    rownames(pathway_matrix)
+  )
+
+
+  if (length(missing_rows) > 0) {
+
+    stop(
+      paste0(
+        "\nMissing pathway variables in ",
+        dataset_name,
+        ":\n",
+        paste(
+          missing_rows,
+          collapse = "\n"
+        ),
+        "\n"
+      )
+    )
+  }
+
+
+  cat(
+    "\nPathway check passed for ",
+    dataset_name,
+    "\n",
+    sep = ""
+  )
+
+
+  cat(
+    "X: ",
+    x_variable,
+    "\n",
+    sep = ""
+  )
+
+
+  cat(
+    "M: ",
+    mediator_variable,
+    "\n",
+    sep = ""
+  )
+
+
+  cat(
+    "Y pathways:\n",
+    paste(
+      outcome_variables,
+      collapse = "\n"
+    ),
+    "\n"
+  )
+}
+
+
+check_pathways(
+  pathway_matrix = tcga_pathway_scores,
+  dataset_name = "TCGA",
+  x_variable = x_variable,
+  mediator_variable = mediator_variable,
+  outcome_variables = outcome_variables
+)
+
+
+check_pathways(
+  pathway_matrix = gse_pathway_scores,
+  dataset_name = "GSE76427",
+  x_variable = x_variable,
+  mediator_variable = mediator_variable,
+  outcome_variables = outcome_variables
+)
+
+
+# ============================================================
+# 6. PREPARE MEDIATION DATA
+# ============================================================
+
+prepare_mediation_data <- function(
+    pathway_matrix,
+    x_variable,
+    mediator_variable,
+    outcome_variable
+) {
+
+  pathway_matrix <- as.matrix(
+    pathway_matrix
+  )
+
+
+  required_rows <- c(
+    x_variable,
+    mediator_variable,
+    outcome_variable
+  )
+
+
+  missing_rows <- setdiff(
+    required_rows,
+    rownames(pathway_matrix)
+  )
+
+
+  if (length(missing_rows) > 0) {
+
+    stop(
+      paste0(
+        "\nMissing pathway variables:\n",
+        paste(
+          missing_rows,
+          collapse = "\n"
+        )
+      )
+    )
+  }
+
+
+  data <- data.frame(
+    sample_id = colnames(pathway_matrix),
+
+    X = as.numeric(
+      pathway_matrix[
+        x_variable,
+        ,
+        drop = TRUE
+      ]
+    ),
+
+    M = as.numeric(
+      pathway_matrix[
+        mediator_variable,
+        ,
+        drop = TRUE
+      ]
+    ),
+
+    Y = as.numeric(
+      pathway_matrix[
+        outcome_variable,
+        ,
+        drop = TRUE
+      ]
+    ),
+
+    stringsAsFactors = FALSE
+  )
+
+
+  # ----------------------------------------------------------
+  # Remove incomplete / non-finite observations
+  # ----------------------------------------------------------
+
+  data <- data[
+    is.finite(data$X) &
+      is.finite(data$M) &
+      is.finite(data$Y),
+    ,
+    drop = FALSE
+  ]
+
+
+  # ----------------------------------------------------------
+  # Minimum sample size
+  # ----------------------------------------------------------
+
+  if (nrow(data) < 30) {
+
+    stop(
+      paste0(
+        "\nFewer than 30 complete observations for:\n",
+        x_variable,
+        " -> ",
+        mediator_variable,
+        " -> ",
+        outcome_variable,
+        "\nComplete observations: ",
+        nrow(data)
+      )
+    )
+  }
+
+
+  return(data)
+}
+
+
+# ============================================================
+# 7. RUN ONE MEDIATION ANALYSIS
+# ============================================================
+
+run_single_mediation <- function(
+    pathway_matrix,
+    dataset_name,
+    x_variable,
+    mediator_variable,
+    outcome_variable,
+    bootstrap_sims = 5000
+) {
+
+
+  # ----------------------------------------------------------
+  # Prepare data
+  # ----------------------------------------------------------
+
+  mediation_data <- prepare_mediation_data(
+    pathway_matrix = pathway_matrix,
+    x_variable = x_variable,
+    mediator_variable = mediator_variable,
+    outcome_variable = outcome_variable
+  )
+
+
+  # ----------------------------------------------------------
+  # Mediator model
+  #
+  # M = aX + error
+  # ----------------------------------------------------------
+
+  mediator_model <- lm(
+    M ~ X,
+    data = mediation_data
+  )
+
+
+  # ----------------------------------------------------------
+  # Outcome model
+  #
+  # Y = c'X + bM + error
+  # ----------------------------------------------------------
+
+  outcome_model <- lm(
+    Y ~ X + M,
+    data = mediation_data
+  )
+
+
+  # ----------------------------------------------------------
+  # Bootstrap mediation
+  # ----------------------------------------------------------
+
+  mediation_fit <- mediation::mediate(
+    model.m = mediator_model,
+    model.y = outcome_model,
+    treat = "X",
+    mediator = "M",
+    boot = TRUE,
+    sims = bootstrap_sims
+  )
+
+
+  # ----------------------------------------------------------
+  # Extract mediation summary
+  # ----------------------------------------------------------
+
+  summary_fit <- summary(
+    mediation_fit
+  )
+
+
+  # ----------------------------------------------------------
+  # Extract regression coefficients
+  # ----------------------------------------------------------
+
+  mediator_coefficients <- coef(
+    summary(
+      mediator_model
+    )
+  )
+
+
+  outcome_coefficients <- coef(
+    summary(
+      outcome_model
+    )
+  )
+
+
+  # ----------------------------------------------------------
+  # Construct result
+  # ----------------------------------------------------------
+
+  result <- tibble(
+
+    dataset = dataset_name,
+
+    X = x_variable,
+
+    mediator = mediator_variable,
+
+    outcome = outcome_variable,
+
+    n = nrow(mediation_data),
+
+
+    # --------------------------------------------------------
+    # Total effect
+    # --------------------------------------------------------
+
+    total_effect = as.numeric(
+      summary_fit$tau.coef
+    ),
+
+    total_effect_p = as.numeric(
+      summary_fit$tau.p
+    ),
+
+
+    # --------------------------------------------------------
+    # Indirect / mediated effect
+    # --------------------------------------------------------
+
+    indirect_effect_acme = as.numeric(
+      summary_fit$d.avg
+    ),
+
+    indirect_effect_ci_low = as.numeric(
+      summary_fit$d.avg.ci[1]
+    ),
+
+    indirect_effect_ci_high = as.numeric(
+      summary_fit$d.avg.ci[2]
+    ),
+
+    indirect_effect_p = as.numeric(
+      summary_fit$d.avg.p
+    ),
+
+
+    # --------------------------------------------------------
+    # Direct effect
+    # --------------------------------------------------------
+
+    direct_effect_ade = as.numeric(
+      summary_fit$z.avg
+    ),
+
+    direct_effect_ci_low = as.numeric(
+      summary_fit$z.avg.ci[1]
+    ),
+
+    direct_effect_ci_high = as.numeric(
+      summary_fit$z.avg.ci[2]
+    ),
+
+    direct_effect_p = as.numeric(
+      summary_fit$z.avg.p
+    ),
+
+
+    # --------------------------------------------------------
+    # Proportion mediated
+    # --------------------------------------------------------
+
+    proportion_mediated = as.numeric(
+      summary_fit$n.avg
+    ),
+
+    proportion_mediated_ci_low = as.numeric(
+      summary_fit$n.avg.ci[1]
+    ),
+
+    proportion_mediated_ci_high = as.numeric(
+      summary_fit$n.avg.ci[2]
+    ),
+
+    proportion_mediated_p = as.numeric(
+      summary_fit$n.avg.p
+    ),
+
+
+    # --------------------------------------------------------
+    # a path
+    #
+    # X -> M
+    # --------------------------------------------------------
+
+    a_path_estimate = as.numeric(
+      mediator_coefficients[
+        "X",
+        "Estimate"
+      ]
+    ),
+
+    a_path_p = as.numeric(
+      mediator_coefficients[
+        "X",
+        "Pr(>|t|)"
+      ]
+    ),
+
+
+    # --------------------------------------------------------
+    # b path
+    #
+    # M -> Y controlling for X
+    # --------------------------------------------------------
+
+    b_path_estimate = as.numeric(
+      outcome_coefficients[
+        "M",
+        "Estimate"
+      ]
+    ),
+
+    b_path_p = as.numeric(
+      outcome_coefficients[
+        "M",
+        "Pr(>|t|)"
+      ]
+    ),
+
+
+    # --------------------------------------------------------
+    # Direct X effect
+    #
+    # X -> Y controlling for M
+    # --------------------------------------------------------
+
+    direct_x_effect_estimate = as.numeric(
+      outcome_coefficients[
+        "X",
+        "Estimate"
+      ]
+    ),
+
+    direct_x_effect_p = as.numeric(
+      outcome_coefficients[
+        "X",
+        "Pr(>|t|)"
+      ]
+    )
+  )
+
+
+  # ----------------------------------------------------------
+  # Bootstrap criterion
+  # ----------------------------------------------------------
+
+  result$bootstrap_excludes_zero <- (
+    result$indirect_effect_ci_low > 0 |
+      result$indirect_effect_ci_high < 0
+  )
+
+
+  # ----------------------------------------------------------
+  # Unadjusted significance criterion
+  # ----------------------------------------------------------
+
+  result$significant_indirect <- (
+    result$indirect_effect_p < 0.05
+  )
+
+
+  # ----------------------------------------------------------
+  # Return everything
+  # ----------------------------------------------------------
+
+  return(
+    list(
+      result = result,
+      mediation_object = mediation_fit,
+      mediator_model = mediator_model,
+      outcome_model = outcome_model,
+      data = mediation_data
+    )
+  )
+}
+
+
+# ============================================================
+# 8. RUN MODEL SET
+# ============================================================
+
+run_model_set <- function(
+    pathway_matrix,
+    dataset_name,
+    x_variable,
+    mediator_variable,
+    outcome_variables,
+    bootstrap_sims = 5000
+) {
+
+  all_results <- list()
+
+  all_objects <- list()
+
+  counter <- 1
+
+
+  for (outcome_variable in outcome_variables) {
+
+
+    cat(
+      "\n--------------------------------------------\n"
+    )
+
+
+    cat(
+      "Running mediation:\n",
+      dataset_name,
+      " | ",
+      x_variable,
+      " -> ",
+      mediator_variable,
+      " -> ",
+      outcome_variable,
+      "\n",
+      sep = ""
+    )
+
+
+    # --------------------------------------------------------
+    # Check pathways
+    # --------------------------------------------------------
+
+    required_rows <- c(
+      x_variable,
+      mediator_variable,
+      outcome_variable
+    )
+
+
+    missing_rows <- setdiff(
+      required_rows,
+      rownames(
+        as.matrix(pathway_matrix)
+      )
+    )
+
+
+    if (length(missing_rows) > 0) {
+
+      cat(
+        "SKIPPED: missing pathway(s): ",
+        paste(
+          missing_rows,
+          collapse = ", "
+        ),
+        "\n",
+        sep = ""
+      )
+
+
+      next
+    }
+
+
+    # --------------------------------------------------------
+    # Run mediation safely
+    # --------------------------------------------------------
+
+    mediation_run <- tryCatch(
+
+      run_single_mediation(
+        pathway_matrix = pathway_matrix,
+        dataset_name = dataset_name,
+        x_variable = x_variable,
+        mediator_variable = mediator_variable,
+        outcome_variable = outcome_variable,
+        bootstrap_sims = bootstrap_sims
+      ),
+
+      error = function(e) {
+
+        cat(
+          "ERROR: ",
+          conditionMessage(e),
+          "\n",
+          sep = ""
+        )
+
+        return(NULL)
+      }
+    )
+
+
+    # --------------------------------------------------------
+    # Store successful analysis
+    # --------------------------------------------------------
+
+    if (!is.null(mediation_run)) {
+
+      all_results[[counter]] <- (
+        mediation_run$result
+      )
+
+
+      object_name <- paste(
+        dataset_name,
+        "G2M",
+        outcome_variable,
+        sep = "_"
+      )
+
+
+      object_name <- gsub(
+        "[^A-Za-z0-9_]",
+        "_",
+        object_name
+      )
+
+
+      all_objects[
+        object_name
+      ] <- list(
+        mediation_run
+      )
+
+
+      counter <- counter + 1
+    }
+  }
+
+
+  # ----------------------------------------------------------
+  # Return empty object if no analyses completed
+  # ----------------------------------------------------------
+
+  if (length(all_results) == 0) {
+
+    return(
+      list(
+        results = tibble(),
+        objects = list()
+      )
+    )
+  }
+
+
+  # ----------------------------------------------------------
+  # Combine results
+  # ----------------------------------------------------------
+
+  combined_results <- bind_rows(
+    all_results
+  )
+
+
+  return(
+    list(
+      results = combined_results,
+      objects = all_objects
+    )
+  )
+}
+
+
+# ============================================================
+# 9. RUN TCGA
+# ============================================================
+
+cat(
+  "\n\n============================================\n",
+  "TCGA: G2/M MEDIATION ANALYSIS\n",
+  "============================================\n"
+)
+
+
+tcga_g2m <- run_model_set(
+
+  pathway_matrix = tcga_pathway_scores,
+
+  dataset_name = "TCGA",
+
+  x_variable = x_variable,
+
+  mediator_variable = mediator_variable,
+
+  outcome_variables = outcome_variables,
+
+  bootstrap_sims = 5000
+)
+
+
+# ============================================================
+# 10. RUN GSE76427
+# ============================================================
+
+cat(
+  "\n\n============================================\n",
+  "GSE76427: G2/M MEDIATION ANALYSIS\n",
+  "============================================\n"
+)
+
+
+gse76427_g2m <- run_model_set(
+
+  pathway_matrix = gse_pathway_scores,
+
+  dataset_name = "GSE76427",
+
+  x_variable = x_variable,
+
+  mediator_variable = mediator_variable,
+
+  outcome_variables = outcome_variables,
+
+  bootstrap_sims = 5000
+)
+
+
+# ============================================================
+# 11. COMBINE ALL SIX RESULTS
+# ============================================================
+
+g2m_mediation_results <- bind_rows(
+
+  tcga_g2m$results,
+
+  gse76427_g2m$results
+
+)
+
+
+# ============================================================
+# 12. FDR CORRECTION
+# ============================================================
+#
+# BH correction across all six indirect-effect tests:
+#
+# TCGA:
+#   FA metabolism -> G2/M -> HR
+#   FA metabolism -> G2/M -> NHEJ
+#   FA metabolism -> G2/M -> DSB
+#
+# GSE76427:
+#   FA metabolism -> G2/M -> HR
+#   FA metabolism -> G2/M -> NHEJ
+#   FA metabolism -> G2/M -> DSB
+# ============================================================
+
+if (nrow(g2m_mediation_results) > 0) {
+
+  g2m_mediation_results$indirect_effect_fdr <- p.adjust(
+    g2m_mediation_results$indirect_effect_p,
+    method = "BH"
+  )
+
+
+  g2m_mediation_results$significant_indirect_fdr <- (
+    g2m_mediation_results$indirect_effect_fdr < 0.05
+  )
+
+
+  g2m_mediation_results$bootstrap_and_fdr_supported <- (
+
+    g2m_mediation_results$bootstrap_excludes_zero &
+
+      g2m_mediation_results$significant_indirect_fdr
+
+  )
+}
+
+
+# ============================================================
+# 13. ORDER RESULTS
+# ============================================================
+
+if (nrow(g2m_mediation_results) > 0) {
+
+  g2m_mediation_results <- g2m_mediation_results %>%
+
+    arrange(
+      indirect_effect_fdr,
+      dataset,
+      outcome
+    )
+}
+
+
+# ============================================================
+# 14. CREATE CLEAN KEY RESULTS TABLE
+# ============================================================
+
+if (nrow(g2m_mediation_results) > 0) {
+
+  g2m_key_results <- g2m_mediation_results %>%
+
+    select(
+
+      dataset,
+
+      X,
+
+      mediator,
+
+      outcome,
+
+      n,
+
+      total_effect,
+
+      total_effect_p,
+
+      indirect_effect_acme,
+
+      indirect_effect_ci_low,
+
+      indirect_effect_ci_high,
+
+      indirect_effect_p,
+
+      indirect_effect_fdr,
+
+      direct_effect_ade,
+
+      direct_effect_ci_low,
+
+      direct_effect_ci_high,
+
+      direct_effect_p,
+
+      proportion_mediated,
+
+      proportion_mediated_ci_low,
+
+      proportion_mediated_ci_high,
+
+      a_path_estimate,
+
+      a_path_p,
+
+      b_path_estimate,
+
+      b_path_p,
+
+      direct_x_effect_estimate,
+
+      direct_x_effect_p,
+
+      bootstrap_excludes_zero,
+
+      significant_indirect_fdr,
+
+      bootstrap_and_fdr_supported
+
+    ) %>%
+
+    arrange(
+      indirect_effect_fdr
+    )
+}
+
+
+# ============================================================
+# 15. SAVE RESULTS
+# ============================================================
+
+if (nrow(g2m_mediation_results) > 0) {
+
+
+  # ----------------------------------------------------------
+  # Full results
+  # ----------------------------------------------------------
+
+  write_csv(
+
+    g2m_mediation_results,
+
+    file.path(
+      results_dir,
+      "MEDIATION_G2M_ALL_RESULTS.csv"
+    )
+  )
+
+
+  saveRDS(
+
+    g2m_mediation_results,
+
+    file.path(
+      results_dir,
+      "MEDIATION_G2M_ALL_RESULTS.rds"
+    )
+  )
+
+
+  # ----------------------------------------------------------
+  # Clean key results
+  # ----------------------------------------------------------
+
+  write_csv(
+
+    g2m_key_results,
+
+    file.path(
+      results_dir,
+      "MEDIATION_G2M_KEY_RESULTS.csv"
+    )
+  )
+
+
+  saveRDS(
+
+    g2m_key_results,
+
+    file.path(
+      results_dir,
+      "MEDIATION_G2M_KEY_RESULTS.rds"
+    )
+  )
+
+
+  # ----------------------------------------------------------
+  # TCGA results
+  # ----------------------------------------------------------
+
+  write_csv(
+
+    g2m_mediation_results %>%
+      filter(
+        dataset == "TCGA"
+      ),
+
+    file.path(
+      results_dir,
+      "MEDIATION_G2M_TCGA_RESULTS.csv"
+    )
+  )
+
+
+  # ----------------------------------------------------------
+  # GSE76427 results
+  # ----------------------------------------------------------
+
+  write_csv(
+
+    g2m_mediation_results %>%
+      filter(
+        dataset == "GSE76427"
+      ),
+
+    file.path(
+      results_dir,
+      "MEDIATION_G2M_GSE76427_RESULTS.csv"
+    )
+  )
+}
+
+
+# ============================================================
+# 16. SAVE COMPLETE MEDIATION OBJECTS
+# ============================================================
+
+g2m_mediation_objects <- list(
+
+  TCGA_G2M = tcga_g2m,
+
+  GSE76427_G2M = gse76427_g2m
+
+)
+
+
+saveRDS(
+
+  g2m_mediation_objects,
+
+  file.path(
+    results_dir,
+    "MEDIATION_G2M_COMPLETE_OBJECTS.rds"
+  )
+)
+
+
+# ============================================================
+# 17. PRINT SUMMARY
+# ============================================================
+
+cat(
+  "\n\n============================================\n",
+  "G2/M MEDIATION ANALYSIS COMPLETE\n",
+  "============================================\n\n"
+)
+
+
+cat(
+  "X variable:\n  ",
+  x_variable,
+  "\n\n",
+  sep = ""
+)
+
+
+cat(
+  "Mediator:\n  ",
+  mediator_variable,
+  "\n\n",
+  sep = ""
+)
+
+
+cat(
+  "Outcomes:\n  ",
+  paste(
+    outcome_variables,
+    collapse = "\n  "
+  ),
+  "\n\n",
+  sep = ""
+)
+
+
+cat(
+  "Total mediation tests completed: ",
+  nrow(g2m_mediation_results),
+  "\n\n",
+  sep = ""
+)
+
+
+if (nrow(g2m_mediation_results) > 0) {
+
+
+  cat(
+    "Unadjusted significant indirect effects: ",
+    sum(
+      g2m_mediation_results$significant_indirect,
+      na.rm = TRUE
+    ),
+    "\n",
+    sep = ""
+  )
+
+
+  cat(
+    "FDR-significant indirect effects: ",
+    sum(
+      g2m_mediation_results$significant_indirect_fdr,
+      na.rm = TRUE
+    ),
+    "\n",
+    sep = ""
+  )
+
+
+  cat(
+    "Bootstrap CI excludes zero: ",
+    sum(
+      g2m_mediation_results$bootstrap_excludes_zero,
+      na.rm = TRUE
+    ),
+    "\n",
+    sep = ""
+  )
+
+
+  cat(
+    "Both bootstrap + FDR supported: ",
+    sum(
+      g2m_mediation_results$bootstrap_and_fdr_supported,
+      na.rm = TRUE
+    ),
+    "\n\n",
+    sep = ""
+  )
+
+
+  cat(
+    "============================================\n",
+    "KEY RESULTS\n",
+    "============================================\n\n"
+  )
+
+
+  print(
+
+    g2m_key_results %>%
+
+      select(
+
+        dataset,
+
+        mediator,
+
+        outcome,
+
+        n,
+
+        a_path_estimate,
+
+        a_path_p,
+
+        b_path_estimate,
+
+        b_path_p,
+
+        indirect_effect_acme,
+
+        indirect_effect_ci_low,
+
+        indirect_effect_ci_high,
+
+        indirect_effect_p,
+
+        indirect_effect_fdr,
+
+        bootstrap_and_fdr_supported
+
+      )
+
+  )
+}
+
+
+# ============================================================
+# 18. OUTPUT LOCATION
+# ============================================================
+
+cat(
+  "\n\nResults saved to:\n  ",
+  normalizePath(
+    results_dir,
+    winslash = "/",
+    mustWork = FALSE
+  ),
+  "\n\n",
+  sep = ""
+)
+
+
+cat(
+  "Files created:\n",
+  "  MEDIATION_G2M_ALL_RESULTS.csv\n",
+  "  MEDIATION_G2M_KEY_RESULTS.csv\n",
+  "  MEDIATION_G2M_TCGA_RESULTS.csv\n",
+  "  MEDIATION_G2M_GSE76427_RESULTS.csv\n",
+  "  MEDIATION_G2M_ALL_RESULTS.rds\n",
+  "  MEDIATION_G2M_KEY_RESULTS.rds\n",
+  "  MEDIATION_G2M_COMPLETE_OBJECTS.rds\n\n"
+)
+
+
+# ============================================================
+# 19. FINAL INTERPRETATION REMINDER
+# ============================================================
+
+cat(
+  "IMPORTANT:\n",
+  "These mediation analyses use cross-sectional pathway\n",
+  "scores and therefore provide evidence consistent with\n",
+  "statistical mediation, not proof of causal mediation.\n"
+)
