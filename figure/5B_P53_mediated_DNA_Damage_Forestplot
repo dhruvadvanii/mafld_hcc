@@ -1,0 +1,877 @@
+# ============================================================
+# P53-DEPENDENT DNA DAMAGE RESPONSE MEDIATION — COMBINED FOREST PLOT
+# TCGA vs GSE76427
+#
+# Mediator:
+#   P53_DEPENDENT_G1_DNA_DAMAGE_RESPONSE
+#
+# Layout within each pathway-dataset block:
+#
+#   ■ Direct effect       + 95% CI
+#   ○ Total effect        + Proportion mediated
+#   ◆ Indirect effect     + 95% CI
+#
+# Dataset colours:
+#   TCGA      = blue
+#   GSE76427  = orange
+#
+# Pathway labels:
+#   DOUBLE_STRAND_BREAK_REPAIR       = DSB Repair
+#   HOMOLOGOUS_RECOMBINATION         = HR
+#   NON_HOMOLOGOUS_END_JOINING       = NHEJ
+#
+# Six grey separator lines are added between the six
+# pathway-dataset blocks.
+# ============================================================
+
+
+# ============================================================
+# 1. PACKAGES
+# ============================================================
+
+required_packages <- c(
+  "readxl",
+  "ggplot2",
+  "dplyr"
+)
+
+for (pkg in required_packages) {
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    install.packages(pkg)
+  }
+}
+
+library(readxl)
+library(ggplot2)
+library(dplyr)
+
+
+# ============================================================
+# 2. RESULTS FILE
+# ============================================================
+
+results_file <- "C:/Users/Dhruv Advani/OneDrive/Desktop/AIIMS/Research/MAFLD_HCC_Pipeline/Results.xlsx"
+
+if (!file.exists(results_file)) {
+  stop(
+    paste0(
+      "Results.xlsx was not found at:\n",
+      results_file
+    )
+  )
+}
+
+cat(
+  "Using Results file:\n",
+  results_file,
+  "\n\n"
+)
+
+
+# ============================================================
+# 3. READ MEDIATION ANALYSIS SHEET
+# ============================================================
+
+med <- read_excel(
+  results_file,
+  sheet = "Mediation Analysis"
+)
+
+
+# ============================================================
+# 4. CHECK REQUIRED COLUMNS
+# ============================================================
+
+required_columns <- c(
+  "Dataset",
+  "Model",
+  "Mediator",
+  "Outcome",
+  "Total Effect",
+  "Total Effect P",
+  "Indirect Effect (ACME)",
+  "Indirect Effect CI Low",
+  "Indirect Effect CI High",
+  "Indirect Effect P",
+  "Direct Effect (ADE)",
+  "Direct Effect CI Low",
+  "Direct Effect CI High",
+  "Direct Effect P",
+  "Proportion Mediated"
+)
+
+missing_columns <- setdiff(
+  required_columns,
+  names(med)
+)
+
+if (length(missing_columns) > 0) {
+  stop(
+    paste0(
+      "The following required columns are missing from ",
+      "'Mediation Analysis':\n\n",
+      paste(
+        missing_columns,
+        collapse = "\n"
+      )
+    )
+  )
+}
+
+
+# ============================================================
+# 5. SELECT P53-DEPENDENT DNA DAMAGE RESPONSE ONLY
+# ============================================================
+
+p53 <- med %>%
+  filter(
+    Model == "MODEL_1_P53_MEDIATION",
+    Mediator == "P53_DEPENDENT_G1_DNA_DAMAGE_RESPONSE",
+    Dataset %in% c(
+      "TCGA",
+      "GSE76427"
+    ),
+    Outcome %in% c(
+      "DOUBLE_STRAND_BREAK_REPAIR",
+      "HOMOLOGOUS_RECOMBINATION",
+      "NON_HOMOLOGOUS_END_JOINING"
+    )
+  )
+
+
+# ============================================================
+# 6. CONVERT NUMERIC COLUMNS
+# ============================================================
+
+numeric_columns <- c(
+  "Total Effect",
+  "Total Effect P",
+  "Indirect Effect (ACME)",
+  "Indirect Effect CI Low",
+  "Indirect Effect CI High",
+  "Indirect Effect P",
+  "Direct Effect (ADE)",
+  "Direct Effect CI Low",
+  "Direct Effect CI High",
+  "Direct Effect P",
+  "Proportion Mediated"
+)
+
+for (v in numeric_columns) {
+
+  x <- as.character(
+    p53[[v]]
+  )
+
+  x <- gsub(
+    "\u2212",
+    "-",
+    x,
+    fixed = TRUE
+  )
+
+  p53[[v]] <- suppressWarnings(
+    as.numeric(x)
+  )
+}
+
+
+# ============================================================
+# 7. REMOVE DUPLICATE PATHWAY-DATASET COMBINATIONS
+# ============================================================
+
+p53 <- p53 %>%
+  distinct(
+    Outcome,
+    Dataset,
+    .keep_all = TRUE
+  )
+
+
+# ============================================================
+# 8. EXPLICIT PATHWAY NAME MAPPING
+# ============================================================
+
+pathway_map <- c(
+  "DOUBLE_STRAND_BREAK_REPAIR" = "DSB Repair",
+  "HOMOLOGOUS_RECOMBINATION" = "HR",
+  "NON_HOMOLOGOUS_END_JOINING" = "NHEJ"
+)
+
+p53$Pathway_Label <- unname(
+  pathway_map[
+    as.character(
+      p53$Outcome
+    )
+  ]
+)
+
+if (any(is.na(p53$Pathway_Label))) {
+
+  unmapped <- unique(
+    p53$Outcome[
+      is.na(p53$Pathway_Label)
+    ]
+  )
+
+  stop(
+    paste0(
+      "The following Outcome values could not be mapped:\n",
+      paste(
+        unmapped,
+        collapse = "\n"
+      )
+    )
+  )
+}
+
+
+# ============================================================
+# 9. EXACT ORDER OF BLOCKS
+# ============================================================
+
+combination_order <- c(
+  "DOUBLE_STRAND_BREAK_REPAIR - TCGA",
+  "DOUBLE_STRAND_BREAK_REPAIR - GSE76427",
+
+  "HOMOLOGOUS_RECOMBINATION - TCGA",
+  "HOMOLOGOUS_RECOMBINATION - GSE76427",
+
+  "NON_HOMOLOGOUS_END_JOINING - TCGA",
+  "NON_HOMOLOGOUS_END_JOINING - GSE76427"
+)
+
+
+# ============================================================
+# 10. BUILD PLOTTING DATA
+#
+# Each block:
+#
+#   Subrow 1 = Direct effect
+#   Subrow 2 = Total effect
+#   Subrow 3 = Indirect effect
+# ============================================================
+
+plot_list <- list()
+
+block_number <- 0
+
+for (combination in combination_order) {
+
+  pieces <- strsplit(
+    combination,
+    " - ",
+    fixed = TRUE
+  )[[1]]
+
+  pathway <- pieces[1]
+  dataset <- pieces[2]
+
+  current <- p53[
+    p53$Outcome == pathway &
+      p53$Dataset == dataset,
+    ,
+    drop = FALSE
+  ]
+
+  if (nrow(current) == 0) {
+
+    warning(
+      paste0(
+        "No data found for: ",
+        combination,
+        ". This combination will be skipped."
+      )
+    )
+
+    next
+  }
+
+  current <- current[
+    1,
+    ,
+    drop = FALSE
+  ]
+
+  block_number <- block_number + 1
+
+  pathway_label <- pathway_map[[pathway]]
+
+  block_label <- paste(
+    pathway_label,
+    dataset,
+    sep = " - "
+  )
+
+
+  # ----------------------------------------------------------
+  # Y POSITIONS
+  # ----------------------------------------------------------
+
+  y_direct <- block_number * 4 + 1
+  y_total <- block_number * 4
+  y_indirect <- block_number * 4 - 1
+
+
+  # ----------------------------------------------------------
+  # DIRECT EFFECT
+  # ----------------------------------------------------------
+
+  plot_list[[length(plot_list) + 1]] <- data.frame(
+
+    Block = block_label,
+
+    Pathway = pathway_label,
+
+    Dataset = dataset,
+
+    Effect = "Direct effect",
+
+    Estimate =
+      current[["Direct Effect (ADE)"]][1],
+
+    CI_low =
+      current[["Direct Effect CI Low"]][1],
+
+    CI_high =
+      current[["Direct Effect CI High"]][1],
+
+    Proportion = NA_real_,
+
+    Y = y_direct,
+
+    stringsAsFactors = FALSE
+  )
+
+
+  # ----------------------------------------------------------
+  # TOTAL EFFECT
+  # ----------------------------------------------------------
+
+  plot_list[[length(plot_list) + 1]] <- data.frame(
+
+    Block = block_label,
+
+    Pathway = pathway_label,
+
+    Dataset = dataset,
+
+    Effect = "Total effect",
+
+    Estimate =
+      current[["Total Effect"]][1],
+
+    CI_low = NA_real_,
+
+    CI_high = NA_real_,
+
+    Proportion =
+      current[["Proportion Mediated"]][1],
+
+    Y = y_total,
+
+    stringsAsFactors = FALSE
+  )
+
+
+  # ----------------------------------------------------------
+  # INDIRECT EFFECT
+  # ----------------------------------------------------------
+
+  plot_list[[length(plot_list) + 1]] <- data.frame(
+
+    Block = block_label,
+
+    Pathway = pathway_label,
+
+    Dataset = dataset,
+
+    Effect = "Indirect effect",
+
+    Estimate =
+      current[["Indirect Effect (ACME)"]][1],
+
+    CI_low =
+      current[["Indirect Effect CI Low"]][1],
+
+    CI_high =
+      current[["Indirect Effect CI High"]][1],
+
+    Proportion = NA_real_,
+
+    Y = y_indirect,
+
+    stringsAsFactors = FALSE
+  )
+}
+
+
+# ============================================================
+# 11. COMBINE PLOT DATA
+# ============================================================
+
+if (length(plot_list) == 0) {
+
+  stop(
+    paste0(
+      "No P53_DEPENDENT_G1_DNA_DAMAGE_RESPONSE mediation ",
+      "rows were found for TCGA/GSE76427 and the three ",
+      "specified DDR outcomes."
+    )
+  )
+}
+
+plot_data <- do.call(
+  rbind,
+  plot_list
+)
+
+
+# ============================================================
+# 12. FACTOR ORDERING
+# ============================================================
+
+plot_data$Effect <- factor(
+  plot_data$Effect,
+  levels = c(
+    "Direct effect",
+    "Total effect",
+    "Indirect effect"
+  )
+)
+
+plot_data$Dataset <- factor(
+  plot_data$Dataset,
+  levels = c(
+    "TCGA",
+    "GSE76427"
+  )
+)
+
+
+# ============================================================
+# 13. CENTRE PATHWAY-DATASET LABELS
+# ============================================================
+
+block_centres <- plot_data %>%
+  group_by(Block) %>%
+  summarise(
+    Y_center = mean(Y),
+    .groups = "drop"
+  )
+
+display_order <- c(
+  "DSB Repair - TCGA",
+  "DSB Repair - GSE76427",
+  "HR - TCGA",
+  "HR - GSE76427",
+  "NHEJ - TCGA",
+  "NHEJ - GSE76427"
+)
+
+block_centres$Block <- factor(
+  block_centres$Block,
+  levels = display_order
+)
+
+block_centres <- block_centres %>%
+  arrange(Block)
+
+
+# ============================================================
+# 14. PROPORTION MEDIATED
+# ============================================================
+
+prop_data <- plot_data %>%
+  filter(
+    Effect == "Total effect"
+  ) %>%
+  mutate(
+    prop_label = ifelse(
+      is.na(Proportion),
+      "",
+      paste0(
+        "Proportion mediated ",
+        round(
+          Proportion * 100,
+          1
+        ),
+        "%"
+      )
+    )
+  )
+
+
+# ============================================================
+# 15. DETERMINE X-AXIS RANGE
+# ============================================================
+
+all_values <- c(
+  plot_data$Estimate,
+  plot_data$CI_low,
+  plot_data$CI_high
+)
+
+all_values <- all_values[
+  is.finite(all_values)
+]
+
+x_min <- min(
+  all_values,
+  na.rm = TRUE
+)
+
+x_max <- max(
+  all_values,
+  na.rm = TRUE
+)
+
+x_range <- x_max - x_min
+
+if (!is.finite(x_range) || x_range == 0) {
+  x_range <- 1
+}
+
+
+# ============================================================
+# 16. PLACE PROPORTION MEDIATED
+# ============================================================
+
+prop_x_offset <- 0.045 * x_range
+
+prop_data$label_x <-
+  prop_data$Estimate +
+  prop_x_offset
+
+x_left <- x_min -
+  0.12 * x_range
+
+x_right <- max(
+  x_max + 0.08 * x_range,
+  max(
+    prop_data$label_x,
+    na.rm = TRUE
+  ) + 0.10 * x_range
+)
+
+
+# ============================================================
+# 17. SIX GREY SEPARATOR LINES
+# ============================================================
+
+separator_y <- c(
+  6,
+  10,
+  14,
+  18,
+  22,
+  26
+)
+
+
+# ============================================================
+# 18. CREATE FOREST PLOT
+# ============================================================
+
+p <- ggplot(
+  plot_data,
+  aes(
+    x = Estimate,
+    y = Y
+  )
+) +
+
+  # ----------------------------------------------------------
+  # ZERO-EFFECT REFERENCE LINE
+  # ----------------------------------------------------------
+
+  geom_vline(
+    xintercept = 0,
+    linewidth = .6,
+    linetype = "dashed",
+    colour = "grey40"
+  ) +
+
+  # ----------------------------------------------------------
+  # GREY SEPARATOR LINES
+  # ----------------------------------------------------------
+
+  geom_hline(
+    yintercept = separator_y,
+    linewidth = .5,
+    colour = "grey80"
+  ) +
+
+  # ----------------------------------------------------------
+  # CONFIDENCE INTERVAL
+  # ----------------------------------------------------------
+
+  geom_segment(
+    data = subset(
+      plot_data,
+      is.finite(CI_low) &
+        is.finite(CI_high)
+    ),
+    aes(
+      x = CI_low,
+      xend = CI_high,
+      y = Y,
+      yend = Y,
+      colour = Dataset
+    ),
+    linewidth = .7,
+    inherit.aes = FALSE
+  ) +
+
+  # ----------------------------------------------------------
+  # LOWER CI END CAP
+  # ----------------------------------------------------------
+
+  geom_segment(
+    data = subset(
+      plot_data,
+      is.finite(CI_low) &
+        is.finite(CI_high)
+    ),
+    aes(
+      x = CI_low,
+      xend = CI_low,
+      y = Y - .10,
+      yend = Y + .10,
+      colour = Dataset
+    ),
+    linewidth = .7,
+    inherit.aes = FALSE
+  ) +
+
+  # ----------------------------------------------------------
+  # UPPER CI END CAP
+  # ----------------------------------------------------------
+
+  geom_segment(
+    data = subset(
+      plot_data,
+      is.finite(CI_low) &
+        is.finite(CI_high)
+    ),
+    aes(
+      x = CI_high,
+      xend = CI_high,
+      y = Y - .10,
+      yend = Y + .10,
+      colour = Dataset
+    ),
+    linewidth = .7,
+    inherit.aes = FALSE
+  ) +
+
+  # ----------------------------------------------------------
+  # EFFECT ESTIMATES
+  # ----------------------------------------------------------
+
+  geom_point(
+    aes(
+      colour = Dataset,
+      shape = Effect
+    ),
+    size = 3.4,
+    stroke = 1
+  ) +
+
+  # ----------------------------------------------------------
+  # PROPORTION MEDIATED LABEL
+  # ----------------------------------------------------------
+
+  geom_text(
+    data = prop_data,
+    aes(
+      x = label_x,
+      y = Y,
+      label = prop_label
+    ),
+    inherit.aes = FALSE,
+    hjust = 0,
+    vjust = .5,
+    colour = "black",
+    size = 3.6
+  ) +
+
+  # ----------------------------------------------------------
+  # DATASET COLOURS
+  # ----------------------------------------------------------
+
+  scale_colour_manual(
+    values = c(
+      "TCGA" = "#2171B5",
+      "GSE76427" = "#E67E22"
+    ),
+    name = "Dataset"
+  ) +
+
+  # ----------------------------------------------------------
+  # EFFECT SHAPES
+  # ----------------------------------------------------------
+
+  scale_shape_manual(
+    values = c(
+      "Direct effect" = 15,
+      "Total effect" = 1,
+      "Indirect effect" = 18
+    ),
+    name = "Effect"
+  ) +
+
+  # ----------------------------------------------------------
+  # Y AXIS
+  # ----------------------------------------------------------
+
+  scale_y_continuous(
+    trans = "reverse",
+    breaks = block_centres$Y_center,
+    labels = as.character(
+      block_centres$Block
+    ),
+    expand = expansion(
+      mult = c(
+        .04,
+        .04
+      )
+    )
+  ) +
+
+  # ----------------------------------------------------------
+  # X AXIS
+  # ----------------------------------------------------------
+
+  scale_x_continuous(
+    limits = c(
+      x_left,
+      x_right
+    ),
+    expand = expansion(
+      mult = c(
+        .01,
+        .01
+      )
+    ),
+    name = "Effect estimate"
+  ) +
+
+  # ----------------------------------------------------------
+  # LEGENDS
+  # ----------------------------------------------------------
+
+  guides(
+    colour = guide_legend(
+      order = 1,
+      override.aes = list(
+        shape = 15,
+        size = 3
+      )
+    ),
+    shape = guide_legend(
+      order = 2,
+      override.aes = list(
+        colour = "black",
+        size = 3.2
+      )
+    )
+  ) +
+
+  # ----------------------------------------------------------
+  # TITLE
+  # ----------------------------------------------------------
+
+  labs(
+    title =
+      "P53-Dependent DNA Damage Response as a Mediator of the Lipid Metabolism–DNA Repair Relationship",
+    x = "Effect estimate",
+    y = NULL
+  ) +
+
+  # ----------------------------------------------------------
+  # THEME
+  # ----------------------------------------------------------
+
+  theme_classic(
+    base_size = 12
+  ) +
+
+  theme(
+
+    plot.title = element_text(
+      face = "bold",
+      size = 14,
+      hjust = .5
+    ),
+
+    axis.text.y = element_text(
+      size = 11,
+      colour = "black"
+    ),
+
+    axis.text.x = element_text(
+      size = 10,
+      colour = "black"
+    ),
+
+    axis.title.x = element_text(
+      size = 11,
+      face = "bold"
+    ),
+
+    legend.position = "bottom",
+
+    legend.title = element_text(
+      face = "bold"
+    ),
+
+    legend.text = element_text(
+      size = 10
+    ),
+
+    panel.grid.major.y =
+      element_blank(),
+
+    panel.grid.minor =
+      element_blank(),
+
+    plot.margin = margin(
+      10,
+      30,
+      10,
+      10
+    )
+  )
+
+
+# ============================================================
+# 19. DISPLAY PLOT
+# ============================================================
+
+print(p)
+
+
+# ============================================================
+# 20. SAVE PNG
+# ============================================================
+
+ggsave(
+  "C:/Users/Dhruv Advani/OneDrive/Desktop/AIIMS/Research/MAFLD_HCC_Pipeline/P53_Dependent_DNA_Damage_Mediation_Forest_Plot.png",
+  p,
+  width = 11,
+  height = 9,
+  dpi = 600
+)
+
+
+# ============================================================
+# 21. SAVE PDF
+# ============================================================
+
+ggsave(
+  "C:/Users/Dhruv Advani/OneDrive/Desktop/AIIMS/Research/MAFLD_HCC_Pipeline/P53_Dependent_DNA_Damage_Mediation_Forest_Plot.pdf",
+  p,
+  width = 11,
+  height = 9
+)
