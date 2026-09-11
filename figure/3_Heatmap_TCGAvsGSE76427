@@ -1,0 +1,516 @@
+# ============================================================
+# FA METABOLISM vs DDR
+# TCGA DISCOVERY + GSE76427 VALIDATION
+# SPEARMAN CORRELATION HEATMAP
+# ============================================================
+
+library(readxl)
+library(ggplot2)
+library(grid)
+
+# ============================================================
+# 1. FILE
+# ============================================================
+
+results_file <- "C:/Users/Dhruv Advani/OneDrive/Desktop/AIIMS/Research/MAFLD_HCC_Pipeline/results/Results.xlsx"
+
+# ============================================================
+# 2. READ THE TWO SPEARMAN SHEETS
+# ============================================================
+
+tcga <- read_excel(
+  results_file,
+  sheet = "discovery (TCGA)_Spearman"
+)
+
+gse <- read_excel(
+  results_file,
+  sheet = "Validation (GSE_76427)_Spearman"
+)
+
+# Convert to ordinary data frames
+tcga <- as.data.frame(tcga)
+gse  <- as.data.frame(gse)
+
+# ============================================================
+# 3. CHECK COLUMN NAMES
+# ============================================================
+
+cat("\nTCGA columns:\n")
+print(names(tcga))
+
+cat("\nGSE76427 columns:\n")
+print(names(gse))
+
+
+# ============================================================
+# 4. TCGA
+# ============================================================
+
+# Keep only Hallmark Fatty Acid Metabolism
+tcga_tmp <- tcga[
+  tcga[["lipid pathway"]] ==
+    "HALLMARK FATTY ACID METABOLISM",
+  ,
+  drop = FALSE
+]
+
+# Keep the six required DDR pathways
+tcga_tmp <- tcga_tmp[
+  tcga_tmp[["ddr pathway"]] %in% c(
+    "DOUBLE STRAND BREAK REPAIR",
+    "HOMOLOGOUS RECOMBINATION",
+    "NON HOMOLOGOUS END JOINING",
+    "HALLMARK DNA REPAIR",
+    "BASE EXCISION REPAIR",
+    "MISMATCH REPAIR"
+  ),
+  ,
+  drop = FALSE
+]
+
+# Standardise pathway names
+tcga_DDR <- as.character(tcga_tmp[["ddr pathway"]])
+
+tcga_tmp$DDR <- ifelse(
+  tcga_DDR == "DOUBLE STRAND BREAK REPAIR",
+  "Double-Strand Break Repair",
+  ifelse(
+    tcga_DDR == "HOMOLOGOUS RECOMBINATION",
+    "Homologous Recombination",
+    ifelse(
+      tcga_DDR == "NON HOMOLOGOUS END JOINING",
+      "Non-Homologous End Joining",
+      ifelse(
+        tcga_DDR == "HALLMARK DNA REPAIR",
+        "DNA Repair",
+        ifelse(
+          tcga_DDR == "BASE EXCISION REPAIR",
+          "Base Excision Repair",
+          ifelse(
+            tcga_DDR == "MISMATCH REPAIR",
+            "Mismatch Repair",
+            NA
+          )
+        )
+      )
+    )
+  )
+)
+
+# Extract rho and FDR
+tcga_plot <- data.frame(
+  DDR = tcga_tmp$DDR,
+  Cohort = "TCGA",
+  rho = as.numeric(tcga_tmp$rho),
+  FDR = as.numeric(tcga_tmp$FDR),
+  stringsAsFactors = FALSE
+)
+
+
+# ============================================================
+# 5. GSE76427
+# ============================================================
+
+# Keep only Hallmark Fatty Acid Metabolism
+gse_tmp <- gse[
+  gse[["lipid pathway"]] ==
+    "HALLMARK FATTY ACID METABOLISM",
+  ,
+  drop = FALSE
+]
+
+# Keep the six required DDR pathways
+gse_tmp <- gse_tmp[
+  gse_tmp[["ddr pathway"]] %in% c(
+    "HR",
+    "NHEJ",
+    "DSB_REPAIR",
+    "DNA_REPAIR",
+    "BER",
+    "MMR"
+  ),
+  ,
+  drop = FALSE
+]
+
+# Standardise pathway names
+gse_DDR <- as.character(gse_tmp[["ddr pathway"]])
+
+gse_tmp$DDR <- ifelse(
+  gse_DDR == "DSB_REPAIR",
+  "Double-Strand Break Repair",
+  ifelse(
+    gse_DDR == "HR",
+    "Homologous Recombination",
+    ifelse(
+      gse_DDR == "NHEJ",
+      "Non-Homologous End Joining",
+      ifelse(
+        gse_DDR == "DNA_REPAIR",
+        "DNA Repair",
+        ifelse(
+          gse_DDR == "BER",
+          "Base Excision Repair",
+          ifelse(
+            gse_DDR == "MMR",
+            "Mismatch Repair",
+            NA
+          )
+        )
+      )
+    )
+  )
+)
+
+# Extract rho and FDR
+gse_plot <- data.frame(
+  DDR = gse_tmp$DDR,
+  Cohort = "GSE76427",
+  rho = as.numeric(gse_tmp$rho),
+  FDR = as.numeric(gse_tmp$FDR),
+  stringsAsFactors = FALSE
+)
+
+
+# ============================================================
+# 6. COMBINE
+# ============================================================
+
+plot_data <- rbind(
+  tcga_plot,
+  gse_plot
+)
+
+
+# ============================================================
+# 7. REMOVE ANY DUPLICATES
+# ============================================================
+
+plot_data <- plot_data[
+  !duplicated(
+    plot_data[, c("DDR", "Cohort")]
+  ),
+  ,
+  drop = FALSE
+]
+
+
+# ============================================================
+# 8. ORDER PATHWAYS
+# ============================================================
+
+ddr_order <- c(
+  "Double-Strand Break Repair",
+  "Homologous Recombination",
+  "Non-Homologous End Joining",
+  "DNA Repair",
+  "Base Excision Repair",
+  "Mismatch Repair"
+)
+
+plot_data$DDR <- factor(
+  plot_data$DDR,
+  levels = rev(ddr_order)
+)
+
+plot_data$Cohort <- factor(
+  plot_data$Cohort,
+  levels = c(
+    "TCGA",
+    "GSE76427"
+  )
+)
+
+
+# ============================================================
+# 9. SIGNIFICANCE
+# ============================================================
+
+plot_data$significance <- ifelse(
+  is.na(plot_data$FDR),
+  "",
+  ifelse(
+    plot_data$FDR < 0.001,
+    "***",
+    ifelse(
+      plot_data$FDR < 0.01,
+      "**",
+      ifelse(
+        plot_data$FDR < 0.05,
+        "*",
+        ""
+      )
+    )
+  )
+)
+
+plot_data$label <- paste0(
+  "\u03c1 = ",
+  sprintf("%.2f", plot_data$rho),
+  ifelse(
+    plot_data$significance == "",
+    "",
+    paste0(
+      "\n",
+      plot_data$significance
+    )
+  )
+)
+
+
+# ============================================================
+# 10. VERIFY DATA
+# ============================================================
+
+cat("\n============================================\n")
+cat("DATA USED FOR HEATMAP\n")
+cat("============================================\n")
+
+print(
+  plot_data[
+    order(
+      plot_data$DDR,
+      plot_data$Cohort
+    ),
+    ,
+    drop = FALSE
+  ]
+)
+
+cat(
+  "\nNumber of cells:",
+  nrow(plot_data),
+  "\n"
+)
+
+if (nrow(plot_data) != 12) {
+  warning(
+    "Expected 12 cells (6 pathways x 2 cohorts), but found ",
+    nrow(plot_data),
+    ". Check the pathway names above."
+  )
+}
+
+# ============================================================
+# ORDER DDR PATHWAYS — LEFT TO RIGHT
+# ============================================================
+
+ddr_order <- c(
+  "Double-Strand Break Repair",
+  "Homologous Recombination",
+  "Non-Homologous End Joining",
+  "DNA Repair",
+  "Base Excision Repair",
+  "Mismatch Repair"
+)
+
+plot_data$DDR <- factor(
+  plot_data$DDR,
+  levels = ddr_order
+)
+
+plot_data$Cohort <- factor(
+  plot_data$Cohort,
+  levels = c(
+    "TCGA",
+    "GSE76427"
+  )
+)
+
+# ============================================================
+# 11. HEATMAP — AXES FLIPPED
+# ============================================================
+
+heatmap_plot <- ggplot(
+  plot_data,
+  aes(
+    x = DDR,
+    y = Cohort,
+    fill = rho
+  )
+) +
+
+  geom_tile(
+    colour = "white",
+    linewidth = 1
+  ) +
+
+  geom_text(
+    aes(
+      label = label
+    ),
+    family = "Arial",
+    size = 3.8,
+    lineheight = 0.9,
+    colour = "black"
+  ) +
+
+  scale_fill_gradient2(
+    low = "#3B6FB6",
+    mid = "#F7F5F0",
+    high = "#D97941",
+    midpoint = 0,
+    limits = c(-1, 1),
+    breaks = c(
+      -1,
+      -0.5,
+      0,
+      0.5,
+      1
+    ),
+    name = "Spearman\n\u03c1"
+  ) +
+
+  scale_x_discrete(
+    labels = c(
+      "Double-Strand Break Repair" =
+        "Double-Strand\nBreak Repair",
+
+      "Homologous Recombination" =
+        "Homologous\nRecombination",
+
+      "Non-Homologous End Joining" =
+        "Non-Homologous\nEnd Joining",
+
+      "DNA Repair" =
+        "DNA Repair",
+
+      "Base Excision Repair" =
+        "Base Excision\nRepair",
+
+      "Mismatch Repair" =
+        "Mismatch\nRepair"
+    )
+  ) +
+
+  scale_y_discrete(
+    labels = c(
+      "TCGA" =
+        "TCGA Discovery",
+
+      "GSE76427" =
+        "GSE76427 Validation"
+    )
+  ) +
+
+  labs(
+    title =
+      "Fatty Acid Metabolism–DNA Damage Repair Associations",
+    x = NULL,
+    y = NULL
+  ) +
+
+  theme_minimal(
+    base_family = "Arial"
+  ) +
+
+  theme(
+
+    # Title
+    plot.title = element_text(
+      hjust = 0.5,
+      size = 13,
+      face = "bold",
+      colour = "black",
+      margin = margin(
+        b = 14
+      )
+    ),
+
+    # X axis — DDR pathways
+    axis.text.x = element_text(
+      size = 8.5,
+      colour = "black",
+      lineheight = 0.9,
+      angle = 0,
+      hjust = 0.5
+    ),
+
+    # Y axis — cohorts
+    axis.text.y = element_text(
+      size = 9,
+      face = "bold",
+      colour = "black"
+    ),
+
+    axis.title = element_blank(),
+
+    # Remove grid
+    panel.grid = element_blank(),
+
+    # Legend
+    legend.title = element_text(
+      size = 8,
+      face = "bold"
+    ),
+
+    legend.text = element_text(
+      size = 7
+    ),
+
+    legend.key.height = unit(
+      1.3,
+      "cm"
+    ),
+
+    # Margins
+    plot.margin = margin(
+      12,
+      15,
+      12,
+      12
+    )
+  )
+
+
+# ============================================================
+# 12. DISPLAY
+# ============================================================
+
+print(heatmap_plot)
+
+
+# ============================================================
+# 13. SAVE PDF
+# ============================================================
+
+ggsave(
+  "FA_DDR_Spearman_TCGA_GSE76427_heatmap.pdf",
+  heatmap_plot,
+  width = 9.0,
+  height = 3.8,
+  units = "in",
+  device = cairo_pdf
+)
+
+
+# ============================================================
+# 14. SAVE 600 DPI PNG
+# ============================================================
+
+ggsave(
+  "FA_DDR_Spearman_TCGA_GSE76427_heatmap.png",
+  heatmap_plot,
+  width = 9.0,
+  height = 3.8,
+  units = "in",
+  dpi = 600,
+  bg = "white"
+)
+
+# ============================================================
+# 15. SAVE DATA
+# ============================================================
+
+write.csv(
+  plot_data,
+  "FA_DDR_Spearman_TCGA_GSE76427_heatmap_data.csv",
+  row.names = FALSE
+)
+
+cat(
+  "\n============================================\n",
+  "HEATMAP COMPLETE\n",
+  "============================================\n"
+)
