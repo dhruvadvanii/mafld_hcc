@@ -1,0 +1,795 @@
+# ============================================================
+# P53 PATHWAY + P53-DEPENDENT G1 DDR FIGURES
+# TCGA + GSE76427
+#
+# Lipid score is extracted directly from:
+# HALLMARK_FATTY_ACID_METABOLISM
+#
+# No external annotation file required
+# ============================================================
+
+
+# ============================================================
+# 1. PACKAGES
+# ============================================================
+
+library(ggplot2)
+library(dplyr)
+
+
+# ============================================================
+# 2. FILE PATHS
+# ============================================================
+
+tcga_file <- "C:/Users/Dhruv Advani/OneDrive/Desktop/AIIMS/Research/MAFLD_HCC_Pipeline/imp_results/Results_Imp_TCGA PATHWAY SCORES.csv"
+
+gse_file <- "C:/Users/Dhruv Advani/OneDrive/Desktop/AIIMS/Research/MAFLD_HCC_Pipeline/imp_results/Results_Imp_GSE76427_PATHWAY_SCORES.csv"
+
+
+# ============================================================
+# 3. READ FILES
+# ============================================================
+
+tcga_scores <- read.csv(
+  tcga_file,
+  check.names = FALSE,
+  stringsAsFactors = FALSE
+)
+
+gse_scores <- read.csv(
+  gse_file,
+  check.names = FALSE,
+  stringsAsFactors = FALSE
+)
+
+
+# ============================================================
+# 4. STANDARDIZE FIRST COLUMN
+# ============================================================
+
+colnames(tcga_scores)[1] <- "Pathway"
+colnames(gse_scores)[1] <- "Pathway"
+
+tcga_scores$Pathway <- trimws(
+  as.character(tcga_scores$Pathway)
+)
+
+gse_scores$Pathway <- trimws(
+  as.character(gse_scores$Pathway)
+)
+
+
+# ============================================================
+# 5. PATHWAY NAMES
+# ============================================================
+
+lipid_pathway <-
+  "HALLMARK_FATTY_ACID_METABOLISM"
+
+p53_pathway <-
+  "P53_PATHWAY"
+
+p53_g1_pathway <-
+  "P53_DEPENDENT_G1_DNA_DAMAGE_RESPONSE"
+
+
+# ============================================================
+# 6. VERIFY PATHWAYS
+# ============================================================
+
+required_pathways <- c(
+  lipid_pathway,
+  p53_pathway,
+  p53_g1_pathway
+)
+
+cat("\n============================================================\n")
+cat("PATHWAY CHECK\n")
+cat("============================================================\n")
+
+cat("\nTCGA:\n")
+print(
+  required_pathways %in% tcga_scores$Pathway
+)
+
+cat("\nGSE76427:\n")
+print(
+  required_pathways %in% gse_scores$Pathway
+)
+
+
+missing_tcga <- setdiff(
+  required_pathways,
+  tcga_scores$Pathway
+)
+
+missing_gse <- setdiff(
+  required_pathways,
+  gse_scores$Pathway
+)
+
+if (length(missing_tcga) > 0) {
+  stop(
+    paste0(
+      "\nMissing TCGA pathway(s): ",
+      paste(
+        missing_tcga,
+        collapse = ", "
+      )
+    )
+  )
+}
+
+if (length(missing_gse) > 0) {
+  stop(
+    paste0(
+      "\nMissing GSE76427 pathway(s): ",
+      paste(
+        missing_gse,
+        collapse = ", "
+      )
+    )
+  )
+}
+
+
+# ============================================================
+# 7. SIMPLE PATHWAY EXTRACTION FUNCTION
+#
+# No := or tidy evaluation is used.
+# ============================================================
+
+extract_pathway <- function(
+    score_matrix,
+    pathway_name,
+    column_name
+) {
+
+  pathway_row <- score_matrix[
+    score_matrix$Pathway == pathway_name,
+    ,
+    drop = FALSE
+  ]
+
+  if (nrow(pathway_row) != 1) {
+
+    stop(
+      paste0(
+        "\nPathway '",
+        pathway_name,
+        "' was expected once, but ",
+        nrow(pathway_row),
+        " rows were found."
+      )
+    )
+  }
+
+  result <- data.frame(
+    Sample = colnames(score_matrix)[-1],
+    Score = as.numeric(
+      pathway_row[1, -1]
+    ),
+    stringsAsFactors = FALSE
+  )
+
+  # Ordinary R assignment instead of :=
+
+  colnames(result)[2] <- column_name
+
+  return(result)
+}
+
+
+# ============================================================
+# 8. EXTRACT TCGA SCORES
+# ============================================================
+
+tcga_lipid <- extract_pathway(
+  tcga_scores,
+  lipid_pathway,
+  "Lipid_Score"
+)
+
+tcga_p53 <- extract_pathway(
+  tcga_scores,
+  p53_pathway,
+  "P53"
+)
+
+tcga_p53_g1 <- extract_pathway(
+  tcga_scores,
+  p53_g1_pathway,
+  "P53_G1"
+)
+
+
+# ============================================================
+# 9. EXTRACT GSE76427 SCORES
+# ============================================================
+
+gse_lipid <- extract_pathway(
+  gse_scores,
+  lipid_pathway,
+  "Lipid_Score"
+)
+
+gse_p53 <- extract_pathway(
+  gse_scores,
+  p53_pathway,
+  "P53"
+)
+
+gse_p53_g1 <- extract_pathway(
+  gse_scores,
+  p53_g1_pathway,
+  "P53_G1"
+)
+
+
+# ============================================================
+# 10. COMBINE TCGA PATHWAYS
+# ============================================================
+
+tcga_plot <- merge(
+  tcga_lipid,
+  tcga_p53,
+  by = "Sample"
+)
+
+tcga_plot <- merge(
+  tcga_plot,
+  tcga_p53_g1,
+  by = "Sample"
+)
+
+
+# ============================================================
+# 11. COMBINE GSE76427 PATHWAYS
+# ============================================================
+
+gse_plot <- merge(
+  gse_lipid,
+  gse_p53,
+  by = "Sample"
+)
+
+gse_plot <- merge(
+  gse_plot,
+  gse_p53_g1,
+  by = "Sample"
+)
+
+
+# ============================================================
+# 12. REMOVE SAMPLES WITHOUT LIPID SCORE
+# ============================================================
+
+tcga_plot <- tcga_plot[
+  !is.na(tcga_plot$Lipid_Score),
+]
+
+gse_plot <- gse_plot[
+  !is.na(gse_plot$Lipid_Score),
+]
+
+
+# ============================================================
+# 13. CALCULATE MEDIAN OF EXISTING LIPID SCORE
+# ============================================================
+
+tcga_lipid_median <- median(
+  tcga_plot$Lipid_Score,
+  na.rm = TRUE
+)
+
+gse_lipid_median <- median(
+  gse_plot$Lipid_Score,
+  na.rm = TRUE
+)
+
+
+cat("\n============================================================\n")
+cat("LIPID SCORE MEDIANS\n")
+cat("============================================================\n")
+
+cat(
+  "\nTCGA median = ",
+  tcga_lipid_median,
+  "\n",
+  sep = ""
+)
+
+cat(
+  "GSE76427 median = ",
+  gse_lipid_median,
+  "\n",
+  sep = ""
+)
+
+
+# ============================================================
+# 14. DEFINE LIPID GROUPS
+# ============================================================
+
+tcga_plot$Lipid_Group <- ifelse(
+  tcga_plot$Lipid_Score <= tcga_lipid_median,
+  "Lipid-low",
+  "Lipid-high"
+)
+
+gse_plot$Lipid_Group <- ifelse(
+  gse_plot$Lipid_Score <= gse_lipid_median,
+  "Lipid-low",
+  "Lipid-high"
+)
+
+
+# ============================================================
+# 15. DATASET LABEL
+# ============================================================
+
+tcga_plot$Dataset <- "TCGA"
+
+gse_plot$Dataset <- "GSE76427"
+
+
+# ============================================================
+# 16. CHECK GROUP COUNTS
+# ============================================================
+
+cat("\n============================================================\n")
+cat("GROUP COUNTS\n")
+cat("============================================================\n")
+
+cat("\nTCGA:\n")
+print(
+  table(tcga_plot$Lipid_Group)
+)
+
+cat("\nGSE76427:\n")
+print(
+  table(gse_plot$Lipid_Group)
+)
+
+
+# ============================================================
+# 17. COMBINE DATASETS
+# ============================================================
+
+all_plot_data <- rbind(
+  tcga_plot,
+  gse_plot
+)
+
+
+# ============================================================
+# 18. FACTOR ORDER
+# ============================================================
+
+all_plot_data$Dataset <- factor(
+  all_plot_data$Dataset,
+  levels = c(
+    "TCGA",
+    "GSE76427"
+  )
+)
+
+all_plot_data$Lipid_Group <- factor(
+  all_plot_data$Lipid_Group,
+  levels = c(
+    "Lipid-low",
+    "Lipid-high"
+  )
+)
+
+all_plot_data$Group <- paste(
+  all_plot_data$Dataset,
+  all_plot_data$Lipid_Group,
+  sep = " | "
+)
+
+all_plot_data$Group <- factor(
+  all_plot_data$Group,
+  levels = c(
+    "TCGA | Lipid-low",
+    "TCGA | Lipid-high",
+    "GSE76427 | Lipid-low",
+    "GSE76427 | Lipid-high"
+  )
+)
+
+
+# ============================================================
+# 19. COLORS
+# ============================================================
+
+dataset_cols <- c(
+  "TCGA" = "#3B6FB6",
+  "GSE76427" = "#D8893C"
+)
+
+
+# ============================================================
+# 20. FIGURE FUNCTION
+# ============================================================
+
+make_p53_figure <- function(
+    data,
+    score_column,
+    plot_title,
+    output_prefix,
+    tcga_star,
+    gse_star
+) {
+
+  plot_data <- data[
+    !is.na(data[[score_column]]) &
+      !is.na(data$Lipid_Group),
+  ]
+
+  plot_data$Score <- plot_data[[score_column]]
+
+
+  # ----------------------------------------------------------
+  # Y-axis range
+  # ----------------------------------------------------------
+
+  y_min <- min(
+    plot_data$Score,
+    na.rm = TRUE
+  )
+
+  y_max <- max(
+    plot_data$Score,
+    na.rm = TRUE
+  )
+
+  y_range <- y_max - y_min
+
+  if (y_range == 0) {
+    y_range <- 1
+  }
+
+
+  # ----------------------------------------------------------
+  # Bracket positions
+  # ----------------------------------------------------------
+
+  tcga_bar_y <-
+    y_max + 0.10 * y_range
+
+  gse_bar_y <-
+    y_max + 0.23 * y_range
+
+
+  # ----------------------------------------------------------
+  # Plot
+  # ----------------------------------------------------------
+
+  p <- ggplot(
+    plot_data,
+    aes(
+      x = Group,
+      y = Score,
+      fill = Dataset
+    )
+  ) +
+
+    geom_boxplot(
+      width = 0.62,
+      outlier.shape = NA,
+      linewidth = 0.55,
+      alpha = 0.78
+    ) +
+
+    geom_jitter(
+      aes(
+        color = Dataset
+      ),
+      width = 0.10,
+      size = 1.35,
+      alpha = 0.40
+    ) +
+
+    scale_fill_manual(
+      values = dataset_cols
+    ) +
+
+    scale_color_manual(
+      values = dataset_cols
+    ) +
+
+    scale_x_discrete(
+      labels = c(
+        "TCGA\nLipid-low",
+        "TCGA\nLipid-high",
+        "GSE76427\nLipid-low",
+        "GSE76427\nLipid-high"
+      )
+    ) +
+
+    labs(
+      title = plot_title,
+      x = NULL,
+      y = "GSVA enrichment score"
+    ) +
+
+
+    # ========================================================
+    # TCGA BRACKET
+    # ========================================================
+
+    annotate(
+      "segment",
+      x = 1,
+      xend = 2,
+      y = tcga_bar_y,
+      yend = tcga_bar_y,
+      linewidth = 0.45
+    ) +
+
+    annotate(
+      "segment",
+      x = 1,
+      xend = 1,
+      y =
+        tcga_bar_y -
+        0.025 * y_range,
+      yend = tcga_bar_y,
+      linewidth = 0.45
+    ) +
+
+    annotate(
+      "segment",
+      x = 2,
+      xend = 2,
+      y =
+        tcga_bar_y -
+        0.025 * y_range,
+      yend = tcga_bar_y,
+      linewidth = 0.45
+    ) +
+
+    annotate(
+      "text",
+      x = 1.5,
+      y =
+        tcga_bar_y +
+        0.025 * y_range,
+      label = tcga_star,
+      size = 4.5,
+      fontface = "bold"
+    ) +
+
+
+    # ========================================================
+    # GSE76427 BRACKET
+    # ========================================================
+
+    annotate(
+      "segment",
+      x = 3,
+      xend = 4,
+      y = gse_bar_y,
+      yend = gse_bar_y,
+      linewidth = 0.45
+    ) +
+
+    annotate(
+      "segment",
+      x = 3,
+      xend = 3,
+      y =
+        gse_bar_y -
+        0.025 * y_range,
+      yend = gse_bar_y,
+      linewidth = 0.45
+    ) +
+
+    annotate(
+      "segment",
+      x = 4,
+      xend = 4,
+      y =
+        gse_bar_y -
+        0.025 * y_range,
+      yend = gse_bar_y,
+      linewidth = 0.45
+    ) +
+
+    annotate(
+      "text",
+      x = 3.5,
+      y =
+        gse_bar_y +
+        0.025 * y_range,
+      label = gse_star,
+      size = 4.5,
+      fontface = "bold"
+    ) +
+
+
+    # ========================================================
+    # THEME
+    # ========================================================
+
+    theme_classic(
+      base_size = 11
+    ) +
+
+    theme(
+      plot.title = element_text(
+        hjust = 0.5,
+        face = "bold",
+        size = 13
+      ),
+
+      axis.title.y = element_text(
+        face = "bold",
+        size = 10.5
+      ),
+
+      axis.text.x = element_text(
+        size = 8.5,
+        colour = "black",
+        lineheight = 0.9
+      ),
+
+      axis.text.y = element_text(
+        colour = "black",
+        size = 9
+      ),
+
+      legend.position = "top",
+
+      legend.title = element_blank(),
+
+      legend.text = element_text(
+        size = 9
+      ),
+
+      axis.line = element_line(
+        linewidth = 0.5
+      ),
+
+      axis.ticks = element_line(
+        linewidth = 0.4
+      ),
+
+      plot.margin = margin(
+        12,
+        12,
+        12,
+        12
+      )
+    ) +
+
+    coord_cartesian(
+      ylim = c(
+        y_min,
+        gse_bar_y +
+          0.08 * y_range
+      ),
+      clip = "off"
+    )
+
+
+  # ----------------------------------------------------------
+  # PRINT
+  # ----------------------------------------------------------
+
+  print(p)
+
+
+  # ----------------------------------------------------------
+  # SAVE PDF
+  # ----------------------------------------------------------
+
+  ggsave(
+    paste0(
+      output_prefix,
+      ".pdf"
+    ),
+    p,
+    width = 6.5,
+    height = 4.5,
+    units = "in",
+    device = cairo_pdf
+  )
+
+
+  # ----------------------------------------------------------
+  # SAVE PNG
+  # ----------------------------------------------------------
+
+  ggsave(
+    paste0(
+      output_prefix,
+      ".png"
+    ),
+    p,
+    width = 6.5,
+    height = 4.5,
+    units = "in",
+    dpi = 600
+  )
+
+
+  return(p)
+}
+
+
+# ============================================================
+# 21. FIGURE 1 — P53 PATHWAY
+#
+# TCGA FDR = 2.36e-4  -> ***
+# GSE76427 FDR = 0.851 -> no annotation
+# ============================================================
+
+p_p53 <- make_p53_figure(
+  data = all_plot_data,
+
+  score_column = "P53",
+
+  plot_title = "P53 Pathway",
+
+  output_prefix =
+    "Figure_P53_Pathway_TCGAvsGSE76427",
+
+  tcga_star = "***",
+
+  gse_star = ""
+)
+
+
+# ============================================================
+# 22. FIGURE 2 — P53-DEPENDENT G1 DDR
+#
+# TCGA FDR = 3.87e-10 -> ****
+# GSE76427 FDR = 0.356 -> no annotation
+# ============================================================
+
+p_p53_g1 <- make_p53_figure(
+  data = all_plot_data,
+
+  score_column = "P53_G1",
+
+  plot_title =
+    "P53-Dependent G1 DNA Damage Response",
+
+  output_prefix =
+    "Figure_P53_Dependent_G1_DDR_TCGAvsGSE76427",
+
+  tcga_star = "****",
+
+  gse_star = ""
+)
+
+
+# ============================================================
+# 23. FINAL OUTPUT CHECK
+# ============================================================
+
+cat("\n============================================================\n")
+cat("FINAL GROUP COUNTS USED FOR PLOTTING\n")
+cat("============================================================\n\n")
+
+print(
+  table(
+    all_plot_data$Dataset,
+    all_plot_data$Lipid_Group
+  )
+)
+
+cat("\n\nTCGA lipid median: ")
+cat(tcga_lipid_median)
+
+cat("\nGSE76427 lipid median: ")
+cat(gse_lipid_median)
+
+cat("\n\nGenerated objects:\n")
+cat("  p_p53\n")
+cat("  p_p53_g1\n")
+
+cat("\nPDF and PNG files have been saved.\n")
+cat("============================================================\n")
